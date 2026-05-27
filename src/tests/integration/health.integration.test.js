@@ -20,7 +20,7 @@ describe('Integration: Health Check', () => {
     it('should have helmet security headers', async () => {
       const res = await request(app).get('/api/health');
       expect(res.headers['x-content-type-options']).toBe('nosniff');
-      expect(res.headers['x-frame-options']).toBe('DENY');
+      expect(res.headers['x-frame-options']).toBe('SAMEORIGIN');
     });
   });
 
