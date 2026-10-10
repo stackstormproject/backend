@@ -4,13 +4,15 @@
   "description": "",
   "main": "src/server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest",
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "lint": "eslint src/ --ext .js --no-error-on-unmatched-pattern",
     "lint:fix": "eslint src/ --ext .js --fix --no-error-on-unmatched-pattern",
     "format": "prettier --write src/ --no-error-on-unmatched-pattern",
-    "format:check": "prettier --check src/ --no-error-on-unmatched-pattern"
+    "format:check": "prettier --check src/ --no-error-on-unmatched-pattern",
+    "test:unit": "jest tests/unit/",
+    "test:integration": "jest tests/integration/ --passWithNoTests"
   },
   "repository": {
     "type": "git",
