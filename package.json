@@ -6,7 +6,11 @@
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
     "start": "node src/server.js",
-    "dev": "nodemon src/server.js"
+    "dev": "nodemon src/server.js",
+    "lint": "eslint src/ --ext .js --no-error-on-unmatched-pattern",
+    "lint:fix": "eslint src/ --ext .js --fix --no-error-on-unmatched-pattern",
+    "format": "prettier --write src/ --no-error-on-unmatched-pattern",
+    "format:check": "prettier --check src/ --no-error-on-unmatched-pattern"
   },
   "repository": {
     "type": "git",
@@ -30,7 +34,10 @@
     "sequelize": "^6.37.8"
   },
   "devDependencies": {
-    "eslint": "^8.57.1",
+    "eslint": "^8.2.0",
+    "eslint-config-airbnb-base": "^15.0.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-import": "^2.25.2",
     "jest": "^30.5.2",
     "nodemon": "^3.1.14",
     "prettier": "^3.9.9",
