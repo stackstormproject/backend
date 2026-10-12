@@ -3,6 +3,7 @@
 All notable changes to this project are documented in this file.
 
 ## [Unreleased]
+- Added backend README with install steps and badges (#4)
 
 ### Added
 
