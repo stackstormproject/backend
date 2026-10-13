@@ -12,7 +12,8 @@
     "format": "prettier --write src/ --no-error-on-unmatched-pattern",
     "format:check": "prettier --check src/ --no-error-on-unmatched-pattern",
     "test:unit": "jest tests/unit/",
-    "test:integration": "jest tests/integration/ --passWithNoTests"
+    "test:integration": "jest tests/integration/ --passWithNoTests",
+    "pretest:integration": "sequelize-cli db:migrate"
   },
   "repository": {
     "type": "git",
