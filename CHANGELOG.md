@@ -7,7 +7,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
-- Sequelize models and associations for 21 entities
+- Development seed data
 - Database migrations for 22 tables with the Issues Report corrections
 - Sequelize CLI and database configuration
 - CI/CD pipeline linked to the shared workflow in infra
