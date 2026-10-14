@@ -12,8 +12,9 @@
     "format": "prettier --write src/ --no-error-on-unmatched-pattern",
     "format:check": "prettier --check src/ --no-error-on-unmatched-pattern",
     "test:unit": "jest tests/unit/",
-    "test:integration": "jest tests/integration/ --passWithNoTests",
-    "pretest:integration": "sequelize-cli db:migrate"
+    "test:integration": "jest tests/integration/ --runInBand --passWithNoTests",
+    "pretest:integration": "sequelize-cli db:migrate --env test",
+    "test:coverage": "jest --coverage"
   },
   "repository": {
     "type": "git",
@@ -29,6 +30,7 @@
   "homepage": "https://github.com/stackstormproject/backend#readme",
   "dependencies": {
     "bcrypt": "^6.0.0",
+    "cookie-parser": "^1.4.7",
     "cors": "^2.8.6",
     "dotenv": "^18.0.7",
     "express": "^5.3.0",

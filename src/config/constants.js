@@ -1,0 +1,14 @@
+const ROLES = {
+  CUSTOMER: 'customer',
+  ADMIN: 'admin',
+  SUPER_ADMIN: 'super_admin',
+  SUPPORT_AGENT: 'support_agent',
+};
+const ADMIN_ROLES = [ROLES.ADMIN, ROLES.SUPER_ADMIN, ROLES.SUPPORT_AGENT];
+const AUTH = {
+  MAX_FAILED_LOGINS: 5,
+  LOCK_MINUTES: 15,
+  REFRESH_REUSE_GRACE_SECONDS: 10,
+  RESET_TOKEN_MINUTES: 60,
+};
+module.exports = { ROLES, ADMIN_ROLES, AUTH };
