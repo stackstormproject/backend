@@ -1,11 +1,10 @@
 require('dotenv').config();
+const { validateEnvironment } = require('./config/environment');
+
+validateEnvironment();
 const app = require('./app');
 
-const PORT = process.env.PORT || 5000;
-
-const server = app.listen(PORT, () => {
-  // eslint-disable-next-line no-console
-  console.log(`Server running on port ${PORT}`);
+const port = process.env.PORT || 5000;
+app.listen(port, () => {
+  console.log(`StackStorm API listening on port ${port}`); // eslint-disable
 });
-
-module.exports = server;
