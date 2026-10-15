@@ -1,5 +1,6 @@
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
+
 function notFound(req, res, next) {
   next(
     new AppError(
