@@ -1,4 +1,5 @@
 const logger = require('../config/logger');
+
 function requestLogger(req, res, next) {
 const started = Date.now();
 res.on('finish', () => {
