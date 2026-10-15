@@ -5,12 +5,24 @@ module.exports = (sequelize) => {
     static associate(models) {
       Admin.hasMany(models.ChatSession, { foreignKey: 'agentId', as: 'chatSessions' });
       Admin.hasMany(models.InventoryLog, { foreignKey: 'adminId', as: 'inventoryLogs' });
+      Admin.hasMany(models.RefreshToken, { foreignKey: 'adminId', as: 'refreshTokens' });
     }
   }
 
   Admin.init(
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      failedLoginAttempts: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'failed_login_attempts',
+      },
+      lockedUntil: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'locked_until',
+      },
       email: {
         type: DataTypes.STRING,
         allowNull: false,
