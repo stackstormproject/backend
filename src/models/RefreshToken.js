@@ -49,7 +49,7 @@ module.exports = (sequelize) => {
       tableName: 'refresh_tokens',
       underscored: true,
       updatedAt: false,
-    },
+    }
   );
 
   return RefreshToken;
