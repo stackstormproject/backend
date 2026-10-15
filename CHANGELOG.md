@@ -4,7 +4,7 @@ All notable changes to this project are documented in this file.
 
 ## [Unreleased]
 - Added backend README with install steps and badges (#4)
-
+- Added `refresh_tokens` table and login lockout columns (`failed_login_attempts`, `locked_until`) for admins and customers
 
 ### Added
 
