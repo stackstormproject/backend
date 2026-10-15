@@ -1,8 +1,15 @@
 const winston = require('winston');
 
 const REDACT_FRAGMENTS = [
-  'password', 'token', 'secret', 'authorization', 'cookie', 'email', 'phone',
-  'card', 'hash',
+  'password',
+  'token',
+  'secret',
+  'authorization',
+  'cookie',
+  'email',
+  'phone',
+  'card',
+  'hash',
 ];
 const PROTECTED_KEYS = ['level', 'message', 'timestamp'];
 
@@ -39,7 +46,7 @@ const logger = winston.createLogger({
     winston.format.timestamp(),
     isProduction
       ? winston.format.json()
-      : winston.format.combine(winston.format.colorize(), winston.format.simple()),
+      : winston.format.combine(winston.format.colorize(), winston.format.simple())
   ),
   transports: [new winston.transports.Console()],
 });
