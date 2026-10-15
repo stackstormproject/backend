@@ -5,6 +5,7 @@ All notable changes to this project are documented in this file.
 ## [Unreleased]
 - Added backend README with install steps and badges (#4)
 
+
 ### Added
 
 - Development seed data
@@ -15,3 +16,4 @@ All notable changes to this project are documented in this file.
 - ESLint (Airbnb) and Prettier configuration
 - `.env.example` environment variable template
 - Jest configuration and first test
+- Winston logger with PII redaction and request logging
