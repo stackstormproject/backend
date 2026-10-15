@@ -11,10 +11,8 @@ module.exports = {
 
     await Promise.all(
       ['customers', 'admins'].flatMap((table) =>
-        Object.entries(lockout).map(([name, spec]) =>
-          queryInterface.addColumn(table, name, spec),
-        ),
-      ),
+        Object.entries(lockout).map(([name, spec]) => queryInterface.addColumn(table, name, spec))
+      )
     );
 
     await queryInterface.createTable('refresh_tokens', {
@@ -57,7 +55,7 @@ module.exports = {
       `ALTER TABLE refresh_tokens ADD CONSTRAINT refresh_tokens_one_owner CHECK (
         (customer_id IS NOT NULL AND admin_id IS NULL) OR
         (customer_id IS NULL AND admin_id IS NOT NULL)
-      )`,
+      )`
     );
 
     await queryInterface.addIndex('refresh_tokens', ['customer_id']);
@@ -70,7 +68,7 @@ module.exports = {
       ['customers', 'admins'].flatMap((table) => [
         queryInterface.removeColumn(table, 'failed_login_attempts'),
         queryInterface.removeColumn(table, 'locked_until'),
-      ]),
+      ])
     );
   },
 };
