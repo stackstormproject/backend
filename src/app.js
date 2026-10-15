@@ -6,7 +6,6 @@ const routes = require('./routes');
 const requestLogger = require('./middleware/requestLogger');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
-
 const app = express();
 if (process.env.NODE_ENV === 'production') {
   app.set('trust proxy', 1);
