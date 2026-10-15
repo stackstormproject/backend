@@ -3,6 +3,7 @@ const config = require('../config/database')[process.env.NODE_ENV || 'developmen
 
 const AdminModel = require('./Admin');
 const CustomerModel = require('./Customer');
+const RefreshTokenModel = require('./RefreshToken');
 const AddressModel = require('./Address');
 const ProductModel = require('./Product');
 const ProductVariantModel = require('./ProductVariant');
@@ -30,6 +31,7 @@ const sequelize = config.url
 const models = {
   Admin: AdminModel(sequelize),
   Customer: CustomerModel(sequelize),
+  RefreshToken: RefreshTokenModel(sequelize),
   Address: AddressModel(sequelize),
   Product: ProductModel(sequelize),
   ProductVariant: ProductVariantModel(sequelize),
