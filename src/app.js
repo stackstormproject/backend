@@ -3,6 +3,7 @@ const helmet = require('helmet');
 const cors = require('cors');
 const cookieParser = require('cookie-parser');
 const routes = require('./routes');
+const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const app = express();
 if (process.env.NODE_ENV === 'production') {
@@ -14,7 +15,7 @@ app.use(express.json({ limit: '10kb' }));
 app.use(cookieParser());
 // T22: app.use(requestLogger);
 app.use('/api', routes);
-// T23: app.use(notFound);
-// T23: app.use(errorHandler);
+app.use(notFound);
+app.use(errorHandler);
 
 module.exports = app;
