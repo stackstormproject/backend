@@ -1,4 +1,3 @@
-
 const crypto = require('crypto');
 const jwt = require('jsonwebtoken');
 const { AUTH } = require('../config/constants');
@@ -18,9 +17,7 @@ function getRefreshTtlMs() {
   const match = /^(\d+)d$/.exec(expiresIn);
 
   if (!match || Number(match[1]) < 1) {
-    throw new Error(
-      'REFRESH_TOKEN_EXPIRES_IN must be a positive number of days (for example, 7d)'
-    );
+    throw new Error('REFRESH_TOKEN_EXPIRES_IN must be a positive number of days (for example, 7d)');
   }
 
   return Number(match[1]) * 24 * 60 * 60 * 1000;
@@ -60,9 +57,7 @@ function generateResetToken() {
   return {
     rawToken,
     tokenHash: hashToken(rawToken),
-    expiresAt: new Date(
-      Date.now() + AUTH.RESET_TOKEN_MINUTES * 60 * 1000
-    ),
+    expiresAt: new Date(Date.now() + AUTH.RESET_TOKEN_MINUTES * 60 * 1000),
   };
 }
 
