@@ -9,6 +9,8 @@ All notable changes to this project are documented in this file.
 
 
 
+- Added `refresh_tokens` table and login lockout columns (`failed_login_attempts`, `locked_until`) for admins and customers
+
 ### Added
 
 - Development seed data

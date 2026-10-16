@@ -15,12 +15,24 @@ module.exports = (sequelize) => {
         as: 'loyaltyTransactions',
       });
       Customer.hasMany(models.ChatSession, { foreignKey: 'customerId', as: 'chatSessions' });
+      Customer.hasMany(models.RefreshToken, { foreignKey: 'customerId', as: 'refreshTokens' });
     }
   }
 
   Customer.init(
     {
       id: { type: DataTypes.INTEGER, primaryKey: true, autoIncrement: true },
+      failedLoginAttempts: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'failed_login_attempts',
+      },
+      lockedUntil: {
+        type: DataTypes.DATE,
+        allowNull: true,
+        field: 'locked_until',
+      },
       email: {
         type: DataTypes.STRING,
         allowNull: false,
