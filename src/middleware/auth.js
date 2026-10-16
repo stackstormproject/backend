@@ -3,7 +3,7 @@ const { verifyAccessToken } = require('../utils/tokenGenerator');
 
 function readBearer(req) {
   const header = req.headers.authorization;
-  return header && header.startsWith('Bearer ') ? header.slice(7) : null;
+  return header && header.startsWith('Bearer ') ? header.split(' ')[1] : null;
 }
 
 function auth(req, res, next) {
