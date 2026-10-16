@@ -22,6 +22,7 @@ const EXPECTED_TABLES = [
   'product_variants',
   'products',
   'promo_codes',
+  'refresh_tokens',
   'returns',
   'review_images',
   'reviews',
@@ -41,7 +42,7 @@ describe('database schema', () => {
     await sequelize.close();
   });
 
-  it('should contain all 22 tables given the migrations ran', async () => {
+  it('should contain all 23 tables given the migrations ran', async () => {
     const [rows] = await sequelize.query(
       "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public'"
     );
