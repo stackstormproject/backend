@@ -20,7 +20,9 @@ describe('auth middleware', () => {
   });
 
   it('attaches the verified identity for a valid bearer token', () => {
-    const req = makeRequest(`Bearer ${jwt.sign({ userId: 9, role: 'customer' }, secret)}`);
+    const req = makeRequest(
+      `Bearer ${jwt.sign({ userId: 9, role: 'customer' }, secret, { issuer: 'stackstorm-api' })}`
+    );
     const next = jest.fn();
 
     auth(req, {}, next);
@@ -30,7 +32,10 @@ describe('auth middleware', () => {
   });
 
   it('returns a distinct error for an expired token', () => {
-    const token = jwt.sign({ userId: 9 }, secret, { expiresIn: -1 });
+    const token = jwt.sign({ userId: 9 }, secret, {
+      expiresIn: -1,
+      issuer: 'stackstorm-api',
+    });
     const next = jest.fn();
 
     auth(makeRequest(`Bearer ${token}`), {}, next);
@@ -61,7 +66,9 @@ describe('auth middleware', () => {
   });
 
   it('attaches a valid identity for optional auth', () => {
-    const token = jwt.sign({ userId: 9, role: 'customer' }, secret);
+    const token = jwt.sign({ userId: 9, role: 'customer' }, secret, {
+      issuer: 'stackstorm-api',
+    });
     const req = makeRequest(`Bearer ${token}`);
     const next = jest.fn();
 
