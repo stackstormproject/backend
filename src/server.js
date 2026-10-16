@@ -1,4 +1,4 @@
-require('dotenv').config();
+require('dotenv').config({ quiet: true, override: true });
 const { validateEnvironment } = require('./config/environment');
 
 validateEnvironment();
