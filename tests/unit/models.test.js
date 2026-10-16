@@ -7,11 +7,20 @@ describe('models', () => {
     await models.sequelize.close();
   });
 
-  it('should register 21 models given the model index loads', () => {
+  it('should register 22 models given the model index loads', () => {
     const names = Object.keys(models).filter(
       (key) => !['sequelize', 'Sequelize'].includes(key)
     );
-    expect(names).toHaveLength(21);
+    expect(names).toHaveLength(22);
+  });
+
+  it('should register refresh tokens with mapped fields and owner associations', () => {
+    expect(models.RefreshToken.tableName).toBe('refresh_tokens');
+    expect(models.RefreshToken.rawAttributes.customerId.field).toBe('customer_id');
+    expect(models.RefreshToken.rawAttributes.adminId.field).toBe('admin_id');
+    expect(models.RefreshToken.rawAttributes.tokenHash.field).toBe('token_hash');
+    expect(models.RefreshToken.associations.Customer.target).toBe(models.Customer);
+    expect(models.RefreshToken.associations.Admin.target).toBe(models.Admin);
   });
 
   it('should soft delete customers given paranoid mode', () => {
