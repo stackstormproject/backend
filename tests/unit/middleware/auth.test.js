@@ -31,7 +31,9 @@ describe('auth middleware', () => {
   it('sets the user and continues for a valid bearer token', () => {
     const req = {
       headers: {
-        authorization: `Bearer ${jwt.sign({ userId: 42, role: 'admin' }, process.env.JWT_SECRET)}`,
+        authorization: `Bearer ${jwt.sign({ userId: 42, role: 'admin' }, process.env.JWT_SECRET, {
+          issuer: 'stackstorm-api',
+        })}`,
       },
     };
     const next = jest.fn();
@@ -45,6 +47,7 @@ describe('auth middleware', () => {
   it('returns a token-expired error for an expired bearer token', () => {
     const token = jwt.sign({ userId: 42 }, process.env.JWT_SECRET, {
       expiresIn: -1,
+      issuer: 'stackstorm-api',
     });
     const next = jest.fn();
 
@@ -78,7 +81,9 @@ describe('auth middleware', () => {
   });
 
   it('sets the user when optional authentication has a valid token', () => {
-    const token = jwt.sign({ userId: 42 }, process.env.JWT_SECRET);
+    const token = jwt.sign({ userId: 42 }, process.env.JWT_SECRET, {
+      issuer: 'stackstorm-api',
+    });
     const req = { headers: { authorization: `Bearer ${token}` } };
     const next = jest.fn();
 
