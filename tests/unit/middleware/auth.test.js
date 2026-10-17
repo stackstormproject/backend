@@ -1,4 +1,3 @@
-
 const jwt = require('jsonwebtoken');
 const { auth, optionalAuth } = require('../../../src/middleware/auth');
 const AppError = require('../../../src/utils/AppError');
@@ -38,11 +37,7 @@ describe('auth middleware', () => {
     });
 
     it('sets the user and continues for a valid bearer token', () => {
-      const token = jwt.sign(
-        { userId: 42, role: 'admin' },
-        secret,
-        { issuer: 'stackstorm-api' }
-      );
+      const token = jwt.sign({ userId: 42, role: 'admin' }, secret, { issuer: 'stackstorm-api' });
       const req = makeRequest(`Bearer ${token}`);
       const next = jest.fn();
 
@@ -56,11 +51,7 @@ describe('auth middleware', () => {
     });
 
     it('returns a token-expired error for an expired bearer token', () => {
-      const token = jwt.sign(
-        { userId: 42 },
-        secret,
-        { expiresIn: -1, issuer: 'stackstorm-api' }
-      );
+      const token = jwt.sign({ userId: 42 }, secret, { expiresIn: -1, issuer: 'stackstorm-api' });
       const next = jest.fn();
 
       auth(makeRequest(`Bearer ${token}`), {}, next);
@@ -107,11 +98,9 @@ describe('auth middleware', () => {
     });
 
     it('sets the user when optional authentication has a valid token', () => {
-      const token = jwt.sign(
-        { userId: 42, role: 'customer' },
-        secret,
-        { issuer: 'stackstorm-api' }
-      );
+      const token = jwt.sign({ userId: 42, role: 'customer' }, secret, {
+        issuer: 'stackstorm-api',
+      });
       const req = makeRequest(`Bearer ${token}`);
       const next = jest.fn();
 
