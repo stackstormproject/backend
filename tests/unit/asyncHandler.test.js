@@ -1,4 +1,3 @@
-
 const asyncHandler = require('../../src/utils/asyncHandler');
 
 describe('asyncHandler', () => {
