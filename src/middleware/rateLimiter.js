@@ -1,11 +1,6 @@
 const rateLimit = require('express-rate-limit');
 
-function createLimiter({
-  windowMs,
-  limit,
-  message,
-  skipSuccessfulRequests = false,
-}) {
+function createLimiter({ windowMs, limit, message, skipSuccessfulRequests = false }) {
   return rateLimit({
     windowMs,
     limit,
@@ -13,8 +8,7 @@ function createLimiter({
     legacyHeaders: false,
     skipSuccessfulRequests,
     skip: () => process.env.DISABLE_RATE_LIMIT === 'true',
-    handler: (req, res) =>
-      res.status(429).json({ error: 'TOO_MANY_REQUESTS', message }),
+    handler: (req, res) => res.status(429).json({ error: 'TOO_MANY_REQUESTS', message }),
   });
 }
 
