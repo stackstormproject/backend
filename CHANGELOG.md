@@ -13,6 +13,7 @@ All notable changes to this project are documented in this file.
 
 ### Added
 
+- Rate limiters
 - Development seed data
 - Database migrations for 22 tables with the Issues Report corrections
 - Sequelize CLI and database configuration

@@ -1,4 +1,3 @@
-
 const { hashPassword, comparePassword } = require('../../../src/utils/passwordHash');
 
 describe('passwordHash', () => {
