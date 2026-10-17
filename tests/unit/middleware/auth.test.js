@@ -1,90 +1,137 @@
+
 const jwt = require('jsonwebtoken');
 const { auth, optionalAuth } = require('../../../src/middleware/auth');
+const AppError = require('../../../src/utils/AppError');
 
 describe('auth middleware', () => {
   const secret = 'a-test-signing-secret-that-is-long-enough';
-  const makeRequest = (authorization) => ({ headers: { authorization } });
+  const originalSecret = process.env.JWT_SECRET;
 
-  beforeEach(() => {
+  const makeRequest = (authorization) => ({
+    headers: authorization ? { authorization } : {},
+  });
+
+  beforeAll(() => {
     process.env.JWT_SECRET = secret;
   });
 
-  it('rejects a request without a bearer token', () => {
-    const next = jest.fn();
-
-    auth(makeRequest(undefined), {}, next);
-
-    expect(next).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 401, code: 'UNAUTHORIZED' })
-    );
+  afterAll(() => {
+    if (originalSecret === undefined) {
+      delete process.env.JWT_SECRET;
+    } else {
+      process.env.JWT_SECRET = originalSecret;
+    }
   });
 
-  it('attaches the verified identity for a valid bearer token', () => {
-    const req = makeRequest(
-      `Bearer ${jwt.sign({ userId: 9, role: 'customer' }, secret, { issuer: 'stackstorm-api' })}`
-    );
-    const next = jest.fn();
+  describe('auth', () => {
+    it('rejects requests without a bearer token', () => {
+      const next = jest.fn();
 
-    auth(req, {}, next);
+      auth(makeRequest(undefined), {}, next);
 
-    expect(req.user).toEqual(expect.objectContaining({ userId: 9, role: 'customer' }));
-    expect(next).toHaveBeenCalledWith();
-  });
-
-  it('returns a distinct error for an expired token', () => {
-    const token = jwt.sign({ userId: 9 }, secret, {
-      expiresIn: -1,
-      issuer: 'stackstorm-api',
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 401,
+          code: 'UNAUTHORIZED',
+        })
+      );
     });
-    const next = jest.fn();
 
-    auth(makeRequest(`Bearer ${token}`), {}, next);
+    it('sets the user and continues for a valid bearer token', () => {
+      const token = jwt.sign(
+        { userId: 42, role: 'admin' },
+        secret,
+        { issuer: 'stackstorm-api' }
+      );
+      const req = makeRequest(`Bearer ${token}`);
+      const next = jest.fn();
 
-    expect(next).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 401, code: 'TOKEN_EXPIRED' })
-    );
-  });
+      auth(req, {}, next);
 
-  it('rejects invalid tokens', () => {
-    const next = jest.fn();
-
-    auth(makeRequest('Bearer not-a-jwt'), {}, next);
-
-    expect(next).toHaveBeenCalledWith(
-      expect.objectContaining({ statusCode: 401, code: 'INVALID_TOKEN' })
-    );
-  });
-
-  it('leaves unauthenticated requests anonymous for optional auth', () => {
-    const req = makeRequest(undefined);
-    const next = jest.fn();
-
-    optionalAuth(req, {}, next);
-
-    expect(req.user).toBeNull();
-    expect(next).toHaveBeenCalledWith();
-  });
-
-  it('attaches a valid identity for optional auth', () => {
-    const token = jwt.sign({ userId: 9, role: 'customer' }, secret, {
-      issuer: 'stackstorm-api',
+      expect(req.user).toMatchObject({
+        userId: 42,
+        role: 'admin',
+      });
+      expect(next).toHaveBeenCalledWith();
     });
-    const req = makeRequest(`Bearer ${token}`);
-    const next = jest.fn();
 
-    optionalAuth(req, {}, next);
+    it('returns a token-expired error for an expired bearer token', () => {
+      const token = jwt.sign(
+        { userId: 42 },
+        secret,
+        { expiresIn: -1, issuer: 'stackstorm-api' }
+      );
+      const next = jest.fn();
 
-    expect(req.user).toEqual(expect.objectContaining({ userId: 9, role: 'customer' }));
-    expect(next).toHaveBeenCalledWith();
+      auth(makeRequest(`Bearer ${token}`), {}, next);
+
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 401,
+          code: 'TOKEN_EXPIRED',
+        })
+      );
+    });
+
+    it('returns an invalid-token error for a malformed bearer token', () => {
+      const next = jest.fn();
+
+      auth(makeRequest('Bearer invalid'), {}, next);
+
+      expect(next).toHaveBeenCalledWith(
+        expect.objectContaining({
+          statusCode: 401,
+          code: 'INVALID_TOKEN',
+        })
+      );
+    });
+
+    it('passes AppError instances for failed required authentication', () => {
+      const next = jest.fn();
+
+      auth(makeRequest('Bearer invalid'), {}, next);
+
+      expect(next.mock.calls[0][0]).toBeInstanceOf(AppError);
+    });
   });
 
-  it('ignores invalid credentials for optional auth', () => {
-    const req = makeRequest('Bearer invalid');
-    const next = jest.fn();
+  describe('optionalAuth', () => {
+    it('continues with no user when optional authentication has no token', () => {
+      const req = makeRequest(undefined);
+      const next = jest.fn();
 
-    optionalAuth(req, {}, next);
+      optionalAuth(req, {}, next);
 
-    expect(req.user).toBeNull();
-    expect(next).toHaveBeenCalledWith();
+      expect(req.user).toBeNull();
+      expect(next).toHaveBeenCalledWith();
+    });
+
+    it('sets the user when optional authentication has a valid token', () => {
+      const token = jwt.sign(
+        { userId: 42, role: 'customer' },
+        secret,
+        { issuer: 'stackstorm-api' }
+      );
+      const req = makeRequest(`Bearer ${token}`);
+      const next = jest.fn();
+
+      optionalAuth(req, {}, next);
+
+      expect(req.user).toMatchObject({
+        userId: 42,
+        role: 'customer',
+      });
+      expect(next).toHaveBeenCalledWith();
+    });
+
+    it('continues with no user when optional authentication has an invalid token', () => {
+      const req = makeRequest('Bearer invalid');
+      const next = jest.fn();
+
+      optionalAuth(req, {}, next);
+
+      expect(req.user).toBeNull();
+      expect(next).toHaveBeenCalledWith();
+    });
   });
 });
