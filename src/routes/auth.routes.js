@@ -8,7 +8,6 @@ const { getRefreshTtlMs } = require('../utils/tokenGenerator');
 const {
   loginLimiter,
   registerLimiter,
-  passwordResetLimiter,
 } = require('../middleware/rateLimiter');
 
 const REFRESH_COOKIE = 'refreshToken';
