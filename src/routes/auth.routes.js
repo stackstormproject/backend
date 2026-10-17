@@ -7,6 +7,7 @@ const { auth } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
 const { registerRules, loginRules } = require('../validators/auth.validators');
 const { getRefreshTtlMs } = require('../utils/tokenGenerator');
+const { loginLimiter, registerLimiter } = require('../middleware/rateLimiter');
 
 const REFRESH_COOKIE = 'refreshToken';
 const cookieOptions = () => ({
@@ -19,6 +20,7 @@ const cookieOptions = () => ({
 const router = Router();
 router.post(
   '/register',
+  registerLimiter,
   registerRules,
   validate,
   asyncHandler(async (req, res) => {
@@ -29,6 +31,7 @@ router.post(
 );
 router.post(
   '/login',
+  loginLimiter,
   loginRules,
   validate,
   asyncHandler(async (req, res) => {
