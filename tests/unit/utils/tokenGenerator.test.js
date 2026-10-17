@@ -1,3 +1,4 @@
+
 const jwt = require('jsonwebtoken');
 
 const {
@@ -60,7 +61,9 @@ describe('tokenGenerator', () => {
   it('uses a one-hour access token lifetime by default', () => {
     delete process.env.JWT_EXPIRES_IN;
 
-    const { iat, exp } = jwt.decode(generateAccessToken(5, 'customer'));
+    const { iat, exp } = jwt.decode(
+      generateAccessToken(5, 'customer')
+    );
 
     expect(exp - iat).toBe(60 * 60);
   });
@@ -68,7 +71,9 @@ describe('tokenGenerator', () => {
   it('uses JWT_EXPIRES_IN when configured', () => {
     process.env.JWT_EXPIRES_IN = '2h';
 
-    const { iat, exp } = jwt.decode(generateAccessToken(5, 'customer'));
+    const { iat, exp } = jwt.decode(
+      generateAccessToken(5, 'customer')
+    );
 
     expect(exp - iat).toBe(2 * 60 * 60);
   });
@@ -76,17 +81,25 @@ describe('tokenGenerator', () => {
   it('requires a JWT secret to sign or verify access tokens', () => {
     delete process.env.JWT_SECRET;
 
-    expect(() => generateAccessToken(7, 'customer')).toThrow('JWT_SECRET is required');
+    expect(() => generateAccessToken(7, 'customer')).toThrow(
+      'JWT_SECRET is required'
+    );
 
-    expect(() => verifyAccessToken('token')).toThrow('JWT_SECRET is required');
+    expect(() => verifyAccessToken('token')).toThrow(
+      'JWT_SECRET is required'
+    );
   });
 
   it('rejects expired access tokens', () => {
-    const token = jwt.sign({ userId: 7, role: 'customer' }, process.env.JWT_SECRET, {
-      algorithm: 'HS256',
-      issuer: 'stackstorm-api',
-      expiresIn: -1,
-    });
+    const token = jwt.sign(
+      { userId: 7, role: 'customer' },
+      process.env.JWT_SECRET,
+      {
+        algorithm: 'HS256',
+        issuer: 'stackstorm-api',
+        expiresIn: -1,
+      }
+    );
 
     expect(() => verifyAccessToken(token)).toThrow('jwt expired');
   });
@@ -105,13 +118,17 @@ describe('tokenGenerator', () => {
   });
 
   it('rejects an unsigned token using the none algorithm', () => {
-    const header = Buffer.from(JSON.stringify({ alg: 'none' })).toString('base64url');
+    const header = Buffer.from(
+      JSON.stringify({ alg: 'none' })
+    ).toString('base64url');
 
-    const body = Buffer.from(JSON.stringify({ userId: 1, role: 'super_admin' })).toString(
-      'base64url'
-    );
+    const body = Buffer.from(
+      JSON.stringify({ userId: 1, role: 'super_admin' })
+    ).toString('base64url');
 
-    expect(() => verifyAccessToken(`${header}.${body}.`)).toThrow();
+    expect(() =>
+      verifyAccessToken(`${header}.${body}.`)
+    ).toThrow();
   });
 
   it('generates refresh tokens and hashes them correctly', () => {
@@ -134,13 +151,17 @@ describe('tokenGenerator', () => {
   it('uses seven days when refresh-token expiry is unset', () => {
     delete process.env.REFRESH_TOKEN_EXPIRES_IN;
 
-    expect(getRefreshTtlMs()).toBe(7 * 24 * 60 * 60 * 1000);
+    expect(getRefreshTtlMs()).toBe(
+      7 * 24 * 60 * 60 * 1000
+    );
   });
 
   it('uses the configured refresh-token duration', () => {
     process.env.REFRESH_TOKEN_EXPIRES_IN = '14d';
 
-    expect(getRefreshTtlMs()).toBe(14 * 24 * 60 * 60 * 1000);
+    expect(getRefreshTtlMs()).toBe(
+      14 * 24 * 60 * 60 * 1000
+    );
   });
 
   it('rejects malformed refresh-token expiry configuration', () => {
