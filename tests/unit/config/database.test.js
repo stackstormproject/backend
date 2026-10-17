@@ -34,6 +34,12 @@ describe('test database configuration', () => {
     expect(new URL(databaseConfig.test.url).pathname).toBe('/backend_test');
   });
 
+  it('accepts the legacy testdb name from CI DATABASE_URL', () => {
+    process.env.DATABASE_URL = 'postgres://user:password@localhost:5432/testdb';
+
+    expect(new URL(databaseConfig.test.url).pathname).toBe('/testdb');
+  });
+
   it('rejects an explicit URL that does not target a test database', () => {
     process.env.TEST_DATABASE_URL = 'postgres://user:password@localhost:5432/stackstorm_dev';
 

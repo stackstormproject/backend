@@ -2,8 +2,9 @@ const { sequelize, Customer, Admin, Loyalty } = require('../../src/models');
 const { hashPassword } = require('../../src/utils/passwordHash');
 
 async function resetDatabase() {
-  if (!/_test$/i.test(sequelize.config.database || '')) {
-    throw new Error('Refusing to truncate a database whose name does not end with _test');
+  const databaseName = (sequelize.config.database || '').toLowerCase();
+  if (databaseName !== 'testdb' && !databaseName.endsWith('_test')) {
+    throw new Error('Refusing to truncate a database not explicitly named for testing');
   }
   await sequelize.query(
     'TRUNCATE TABLE refresh_tokens, loyalties, customers, admins RESTART IDENTITY CASCADE'

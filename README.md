@@ -35,8 +35,9 @@ Node.js 20, Express 4, Sequelize 6, PostgreSQL 17, Redis 7, Jest and Supertest.
 Integration tests use `TEST_DATABASE_URL`, which must point to a dedicated PostgreSQL
 database whose name ends in `_test`. If it is unset, the test configuration derives it
 from `DATABASE_URL` only when that URL's database name ends in `_dev` (for example,
-`stackstorm_dev` becomes `stackstorm_test`). The integration setup runs migrations and
-truncates test tables, so do not point it at a development or production database.
+`stackstorm_dev` becomes `stackstorm_test`), or accepts the legacy exact database name
+`testdb` used by CI. The integration setup runs migrations and truncates test tables,
+so do not point it at a development or production database.
 Run `npm run test:integration` before `npx jest --coverage` to apply those migrations.
 
 ## Branches and pull requests
