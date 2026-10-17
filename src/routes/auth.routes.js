@@ -1,8 +1,10 @@
 const { Router } = require('express');
+const { ADMIN_ROLES } = require('../config/constants');
 const AuthService = require('../services/AuthService');
 const asyncHandler = require('../utils/asyncHandler');
 const validate = require('../middleware/validate');
 const { auth } = require('../middleware/auth');
+const { rbac } = require('../middleware/rbac');
 const { registerRules, loginRules } = require('../validators/auth.validators');
 const { getRefreshTtlMs } = require('../utils/tokenGenerator');
 
@@ -39,6 +41,23 @@ router.post(
   })
 );
 router.get('/me', auth, (req, res) => {
+  res.json({ userId: req.user.userId, role: req.user.role });
+});
+router.post(
+  '/admin/login',
+  loginRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    const { admin, accessToken, refreshToken } = await AuthService.loginAdmin(
+      req.body.email,
+      req.body.password
+    );
+    res.cookie(REFRESH_COOKIE, refreshToken, cookieOptions());
+    res.json({ admin, accessToken });
+  })
+);
+
+router.get('/admin/me', auth, rbac(ADMIN_ROLES), (req, res) => {
   res.json({ userId: req.user.userId, role: req.user.role });
 });
 module.exports = { router, REFRESH_COOKIE, cookieOptions };
