@@ -1,5 +1,5 @@
 const crypto = require('crypto');
-const { sequelize, Customer, Loyalty, RefreshToken } = require('../models');
+const { sequelize, Admin, Customer, Loyalty, RefreshToken } = require('../models');
 const AppError = require('../utils/AppError');
 const logger = require('../config/logger');
 const { AUTH } = require('../config/constants');
@@ -102,7 +102,23 @@ async function loginCustomer(email, password) {
   logger.info('Customer logged in', { customerId: customer.id });
   return { customer: toPublicCustomer(customer), ...session };
 }
+function toPublicAdmin(admin) {
+  return {
+    id: admin.id,
+    name: admin.name,
+    email: admin.email,
+    role: admin.role,
+  };
+}
+
+async function loginAdmin(email, password) {
+  const admin = await authenticate(Admin, 'admin', email, password);
+  const session = await issueSession(admin, 'admin');
+  logger.info('Admin logged in', { adminId: admin.id, role: admin.role });
+  return { admin: toPublicAdmin(admin), ...session };
+}
 module.exports = {
+  loginAdmin,
   register,
   loginCustomer,
   issueSession,
