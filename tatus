@@ -1,0 +1,28 @@
+[33m9c63438[m[33m ([m[1;31morigin/feature/36-register-login[m[33m)[m fix(db): remove duplicate refresh tokens migration file
+[33mb37d9f6[m fix(ci): resolve lint errors, prettier formatting, and unit test failures
+[33m9eb84b3[m chore(format): add blank line after requires to satisfy ESLint import/newline-after-import
+[33m390746b[m Refactor token generation functions for clarity
+[33m1cbbd99[m Remove unnecessary whitespace in passwordHash.js
+[33m999f09d[m chore(format): apply Prettier formatting to passwordHash.js
+[33m7203d69[m Merge branch 'develop' into feature/36-register-login
+[33m9bae48f[m feat: initialize server entry point and add pnpm lockfile
+[33m4c7951c[m Merge pull request #29 from stackstormproject/feature/25-error-handler
+[33mfa1741e[m Merge branch 'develop' into feature/36-register-login
+[33m34af4e2[m Merge pull request #33 from stackstormproject/feature/32-refresh-tokens
+[33me80cb45[m feat(auth): add password hashing and token utilities
+[33m9de6aeb[m chore(repo): sync develop into migrations branch (no file changes)
+[33me4782c6[m[33m ([m[1;31morigin/feature/32-refresh-tokens[m[33m, [m[1;32mfeature/32-refresh-tokens[m[33m)[m fix(db): resolve formatting issues for refresh tokens
+[33m3d99d95[m fix(db): resolve migration lint errors
+[33mc26b6d0[m feat(db): add refresh_tokens table and login lockout columns
+[33m776df92[m[33m ([m[1;31morigin/feature/30-auth-utils[m[33m, [m[1;32mfeature/30-auth-utils[m[33m)[m feat(auth): implement password hashing and JWT token generation utilities
+[33me5251e9[m[33m ([m[1;31morigin/feature/25-error-handler[m[33m, [m[1;32mfeature/25-error-handler[m[33m)[m refactor: remove unnecessary blank line in app.js
+[33md61d76c[m Merge branch 'develop' into feature/25-error-handler
+[33mc582c20[m fix: ensure consistent module exports in app and requestLogger
+[33m378fdbd[m merge: resolve conflicts with develop
+[33m4e5ec70[m merge: resolve conflicts with develop
+[33m8c89388[m merge: resolve conflicts with develop
+[33m1b0a5a7[m merge: resolve conflict with develop
+[33m401e7ed[m test(middleware): enhance error handler tests for validation and response handling
+[33m4811c77[m fix: resolve lint errors
+[33m3333cc2[m feat(api): add global error handler and AppError
+[33m92dd656[m[33m ([m[1;31morigin/feature/ddp-16-featdb-add-migrations-for-the-22-tables-with-the-issues-report-corrections[m[33m)[m Merge pull request #22 from stackstormproject/develop

@@ -1,5 +1,5 @@
-process.env.DATABASE_URL =
-  process.env.DATABASE_URL || 'postgresql://test:test@localhost:5432/testdb';
+process.env.TEST_DATABASE_URL =
+  process.env.TEST_DATABASE_URL || 'postgres://postgres:postgres@localhost:5432/models_test';
 
 const models = require('../../src/models');
 
