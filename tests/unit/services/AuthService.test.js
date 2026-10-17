@@ -1,8 +1,9 @@
 jest.mock('../../../src/models', () => ({
   sequelize: { transaction: jest.fn() },
-  Customer: { create: jest.fn(), findOne: jest.fn() },
+  Admin: { findByPk: jest.fn() },
+  Customer: { create: jest.fn(), findOne: jest.fn(), findByPk: jest.fn() },
   Loyalty: { create: jest.fn() },
-  RefreshToken: { create: jest.fn() },
+  RefreshToken: { create: jest.fn(), findOne: jest.fn(), update: jest.fn() },
 }));
 jest.mock('../../../src/utils/passwordHash', () => ({
   hashPassword: jest.fn(),
@@ -11,6 +12,7 @@ jest.mock('../../../src/utils/passwordHash', () => ({
 jest.mock('../../../src/utils/tokenGenerator', () => ({
   generateAccessToken: jest.fn(),
   generateRefreshToken: jest.fn(),
+  hashToken: jest.fn(),
   getRefreshTtlMs: jest.fn(),
 }));
 jest.mock('../../../src/config/logger', () => ({
@@ -19,17 +21,18 @@ jest.mock('../../../src/config/logger', () => ({
   error: jest.fn(),
 }));
 
-const { sequelize, Customer, Loyalty, RefreshToken } = require('../../../src/models');
+const { sequelize, Admin, Customer, Loyalty, RefreshToken } = require('../../../src/models');
 const { hashPassword, comparePassword } = require('../../../src/utils/passwordHash');
 const {
   generateAccessToken,
   generateRefreshToken,
+  hashToken,
   getRefreshTtlMs,
 } = require('../../../src/utils/tokenGenerator');
 const logger = require('../../../src/config/logger');
 const AuthService = require('../../../src/services/AuthService');
 
-const transaction = { id: 'transaction' };
+const transaction = { id: 'transaction', LOCK: { UPDATE: 'UPDATE' } };
 const customerRecord = (overrides = {}) => {
   const customer = {
     id: 23,
@@ -67,6 +70,7 @@ describe('AuthService', () => {
       rawToken: 'raw-refresh-token',
       tokenHash: 'hashed-refresh-token',
     });
+    hashToken.mockReturnValue('hashed-raw-refresh-token');
     getRefreshTtlMs.mockReturnValue(7 * 24 * 60 * 60 * 1000);
   });
 
@@ -220,6 +224,176 @@ describe('AuthService', () => {
         tokenHash: 'hashed-refresh-token',
       }),
       { transaction: undefined }
+    );
+  });
+
+  it('rejects refresh requests without a token', async () => {
+    await expect(AuthService.refresh()).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'NO_REFRESH_TOKEN',
+    });
+    expect(sequelize.transaction).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ['missing', null],
+    ['revoked', { revokedAt: new Date() }],
+  ])('rejects a %s refresh token', async (_description, stored) => {
+    RefreshToken.findOne.mockResolvedValue(stored);
+
+    await expect(AuthService.refresh('raw-token')).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'INVALID_REFRESH_TOKEN',
+    });
+    expect(RefreshToken.findOne).toHaveBeenCalledWith({
+      where: { tokenHash: 'hashed-raw-refresh-token' },
+      lock: transaction.LOCK.UPDATE,
+      transaction,
+    });
+  });
+
+  it('rejects expired refresh tokens', async () => {
+    RefreshToken.findOne.mockResolvedValue({
+      revokedAt: null,
+      expiresAt: new Date(Date.now() - 1000),
+    });
+
+    await expect(AuthService.refresh('raw-token')).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'REFRESH_TOKEN_EXPIRED',
+    });
+  });
+
+  it('asks clients to retry when a refresh token was just used', async () => {
+    RefreshToken.findOne.mockResolvedValue({
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: new Date(),
+    });
+
+    await expect(AuthService.refresh('raw-token')).rejects.toMatchObject({
+      statusCode: 409,
+      code: 'REFRESH_IN_PROGRESS',
+    });
+    expect(RefreshToken.update).not.toHaveBeenCalled();
+  });
+
+  it('revokes all customer sessions when an old refresh token is reused', async () => {
+    RefreshToken.findOne.mockResolvedValue({
+      customerId: 23,
+      adminId: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: new Date(Date.now() - 60_000),
+    });
+
+    await expect(AuthService.refresh('raw-token')).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'REFRESH_TOKEN_REUSE',
+    });
+    expect(RefreshToken.update).toHaveBeenCalledWith(
+      { revokedAt: expect.any(Date) },
+      { where: { customerId: 23, revokedAt: null }, transaction }
+    );
+    expect(logger.warn).toHaveBeenCalledWith('Refresh token reuse detected, all sessions revoked', {
+      customerId: 23,
+    });
+  });
+
+  it('rejects a refresh token whose customer no longer exists', async () => {
+    RefreshToken.findOne.mockResolvedValue({
+      customerId: 23,
+      adminId: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+    });
+    Customer.findByPk.mockResolvedValue(null);
+
+    await expect(AuthService.refresh('raw-token')).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'INVALID_REFRESH_TOKEN',
+    });
+  });
+
+  it('rotates customer refresh tokens', async () => {
+    const customer = customerRecord();
+    const stored = {
+      customerId: customer.id,
+      adminId: null,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+      update: jest.fn(),
+    };
+    RefreshToken.findOne.mockResolvedValue(stored);
+    Customer.findByPk.mockResolvedValue(customer);
+    RefreshToken.create.mockResolvedValue({});
+
+    await expect(AuthService.refresh('raw-token')).resolves.toEqual({
+      accessToken: 'access-token',
+      refreshToken: 'raw-refresh-token',
+    });
+    expect(stored.update).toHaveBeenCalledWith({ usedAt: expect.any(Date) }, { transaction });
+    expect(RefreshToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: customer.id, adminId: null }),
+      { transaction }
+    );
+  });
+
+  it('rejects a refresh token whose administrator no longer exists', async () => {
+    RefreshToken.findOne.mockResolvedValue({
+      customerId: null,
+      adminId: 42,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+    });
+    Admin.findByPk.mockResolvedValue(null);
+
+    await expect(AuthService.refresh('raw-token')).rejects.toMatchObject({
+      statusCode: 401,
+      code: 'INVALID_REFRESH_TOKEN',
+    });
+  });
+
+  it('rotates administrator refresh tokens', async () => {
+    const admin = { id: 42, role: 'admin' };
+    const stored = {
+      customerId: null,
+      adminId: admin.id,
+      revokedAt: null,
+      expiresAt: new Date(Date.now() + 60_000),
+      usedAt: null,
+      update: jest.fn(),
+    };
+    RefreshToken.findOne.mockResolvedValue(stored);
+    Admin.findByPk.mockResolvedValue(admin);
+    RefreshToken.create.mockResolvedValue({});
+
+    await expect(AuthService.refresh('raw-token')).resolves.toEqual({
+      accessToken: 'access-token',
+      refreshToken: 'raw-refresh-token',
+    });
+    expect(RefreshToken.create).toHaveBeenCalledWith(
+      expect.objectContaining({ customerId: null, adminId: admin.id }),
+      { transaction }
+    );
+    expect(generateAccessToken).toHaveBeenCalledWith(admin.id, 'admin');
+  });
+
+  it('does nothing when logging out without a refresh token', async () => {
+    await AuthService.logout();
+
+    expect(RefreshToken.update).not.toHaveBeenCalled();
+  });
+
+  it('revokes an active refresh token on logout', async () => {
+    await AuthService.logout('raw-token');
+
+    expect(RefreshToken.update).toHaveBeenCalledWith(
+      { revokedAt: expect.any(Date) },
+      { where: { tokenHash: 'hashed-raw-refresh-token', revokedAt: null } }
     );
   });
 });

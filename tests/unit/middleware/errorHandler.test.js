@@ -1,5 +1,4 @@
-const { notFound, errorHandler } = 
-require('../../../src/middleware/errorHandler');
+const { notFound, errorHandler } = require('../../../src/middleware/errorHandler');
 const AppError = require('../../../src/utils/AppError');
 jest.mock('../../../src/config/logger');
 const makeRes = () => {
@@ -12,16 +11,19 @@ const req = { path: '/x', method: 'GET' };
 describe('errorHandler', () => {
   it('should return the AppError status and body given an AppError', () => {
     const res = makeRes();
-    errorHandler(new AppError(401, 'UNAUTHORIZED', 'No token'), req, res, 
-jest.fn());
+    errorHandler(new AppError(401, 'UNAUTHORIZED', 'No token'), req, res, jest.fn());
     expect(res.status).toHaveBeenCalledWith(401);
-    expect(res.json).toHaveBeenCalledWith({ error: 'UNAUTHORIZED', message: 
-'No token' });
+    expect(res.json).toHaveBeenCalledWith({ error: 'UNAUTHORIZED', message: 'No token' });
   });
   it('should include details given an AppError with details', () => {
     const res = makeRes();
     const details = [{ field: 'email', message: 'invalid' }];
-    errorHandler(new AppError(400, 'VALIDATION_ERROR', 'Invalid input', details), req, res, jest.fn());
+    errorHandler(
+      new AppError(400, 'VALIDATION_ERROR', 'Invalid input', details),
+      req,
+      res,
+      jest.fn()
+    );
     expect(res.json).toHaveBeenCalledWith({
       error: 'VALIDATION_ERROR',
       message: 'Invalid input',
@@ -60,39 +62,39 @@ jest.fn());
     const res = makeRes();
     const err = new Error('bad json');
     err.type = 'entity.parse.failed';
-errorHandler(err, req, res, jest.fn());
-expect(res.status).toHaveBeenCalledWith(400);
-expect(res.json.mock.calls[0][0].error).toBe('INVALID_JSON');
-});
-it('should return 413 given an oversized request body', () => {
-  const res = makeRes();
-  const err = new Error('too large');
-  err.type = 'entity.too.large';
-  errorHandler(err, req, res, jest.fn());
-  expect(res.status).toHaveBeenCalledWith(413);
-  expect(res.json.mock.calls[0][0].error).toBe('PAYLOAD_TOO_LARGE');
-});
-it('should expose the error message outside production', () => {
-  const original = process.env.NODE_ENV;
-  process.env.NODE_ENV = 'development';
-  const res = makeRes();
-  errorHandler(new Error('database unavailable'), req, res, jest.fn());
-  expect(res.status).toHaveBeenCalledWith(500);
-  expect(res.json.mock.calls[0][0].message).toBe('database unavailable');
-  process.env.NODE_ENV = original;
-});
-it('should hide the error message given an unknown error in production', () => {
-const original = process.env.NODE_ENV;
-process.env.NODE_ENV = 'production';
-const res = makeRes();
-errorHandler(new Error('secret db detail'), req, res, jest.fn());
-expect(res.status).toHaveBeenCalledWith(500);
-expect(res.json.mock.calls[0][0].message).not.toContain('secret');
-process.env.NODE_ENV = original;
-});
-it('should pass a 404 AppError to next given an unknown route', () => {
-const next = jest.fn();
-notFound(req, makeRes(), next);
-expect(next.mock.calls[0][0].statusCode).toBe(404);
-});
+    errorHandler(err, req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json.mock.calls[0][0].error).toBe('INVALID_JSON');
+  });
+  it('should return 413 given an oversized request body', () => {
+    const res = makeRes();
+    const err = new Error('too large');
+    err.type = 'entity.too.large';
+    errorHandler(err, req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(413);
+    expect(res.json.mock.calls[0][0].error).toBe('PAYLOAD_TOO_LARGE');
+  });
+  it('should expose the error message outside production', () => {
+    const original = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'development';
+    const res = makeRes();
+    errorHandler(new Error('database unavailable'), req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json.mock.calls[0][0].message).toBe('database unavailable');
+    process.env.NODE_ENV = original;
+  });
+  it('should hide the error message given an unknown error in production', () => {
+    const original = process.env.NODE_ENV;
+    process.env.NODE_ENV = 'production';
+    const res = makeRes();
+    errorHandler(new Error('secret db detail'), req, res, jest.fn());
+    expect(res.status).toHaveBeenCalledWith(500);
+    expect(res.json.mock.calls[0][0].message).not.toContain('secret');
+    process.env.NODE_ENV = original;
+  });
+  it('should pass a 404 AppError to next given an unknown route', () => {
+    const next = jest.fn();
+    notFound(req, makeRes(), next);
+    expect(next.mock.calls[0][0].statusCode).toBe(404);
+  });
 });

@@ -41,4 +41,21 @@ router.post(
 router.get('/me', auth, (req, res) => {
   res.json({ userId: req.user.userId, role: req.user.role });
 });
+router.post(
+  '/refresh',
+  asyncHandler(async (req, res) => {
+    const { accessToken, refreshToken } = await AuthService.refresh(req.cookies[REFRESH_COOKIE]);
+    res.cookie(REFRESH_COOKIE, refreshToken, cookieOptions());
+    res.json({ accessToken });
+  })
+);
+
+router.post(
+  '/logout',
+  asyncHandler(async (req, res) => {
+    await AuthService.logout(req.cookies[REFRESH_COOKIE]);
+    res.clearCookie(REFRESH_COOKIE, { path: '/api/auth' });
+    res.json({ message: 'Logged out successfully.' });
+  })
+);
 module.exports = { router, REFRESH_COOKIE, cookieOptions };
