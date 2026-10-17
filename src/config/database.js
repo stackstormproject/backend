@@ -19,7 +19,12 @@ function getTestDatabaseUrl() {
 
   const url = new URL(developmentUrl);
   const databaseName = url.pathname.replace(/^\/+/, '');
-  if (!databaseName.toLowerCase().endsWith('_dev')) {
+  const normalizedName = databaseName.toLowerCase();
+  if (normalizedName === 'testdb' || normalizedName.endsWith('_test')) {
+    return url.toString();
+  }
+
+  if (!normalizedName.endsWith('_dev')) {
     throw new Error('Set TEST_DATABASE_URL or use a DATABASE_URL database name ending in _dev');
   }
 
