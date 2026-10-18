@@ -103,6 +103,7 @@ async function loginCustomer(email, password) {
   logger.info('Customer logged in', { customerId: customer.id });
   return { customer: toPublicCustomer(customer), ...session };
 }
+feature/38-refresh-logout
 const ownerWhere = (stored) =>
   stored.customerId ? { customerId: stored.customerId } : { adminId: stored.adminId };
 
@@ -185,6 +186,25 @@ async function logout(rawToken) {
 module.exports = {
   refresh,
   logout,
+
+function toPublicAdmin(admin) {
+  return {
+    id: admin.id,
+    name: admin.name,
+    email: admin.email,
+    role: admin.role,
+  };
+}
+
+async function loginAdmin(email, password) {
+  const admin = await authenticate(Admin, 'admin', email, password);
+  const session = await issueSession(admin, 'admin');
+  logger.info('Admin logged in', { adminId: admin.id, role: admin.role });
+  return { admin: toPublicAdmin(admin), ...session };
+}
+module.exports = {
+  loginAdmin,
+ develop
   register,
   loginCustomer,
   issueSession,
