@@ -40,6 +40,7 @@ describe('test database configuration', () => {
     expect(new URL(databaseConfig.test.url).pathname).toBe('/testdb');
   });
 
+ feature/38-refresh-logout
   it('rejects an explicit URL that does not target a test database', () => {
     process.env.TEST_DATABASE_URL = 'postgres://user:password@localhost:5432/stackstorm_dev';
 
@@ -49,6 +50,17 @@ describe('test database configuration', () => {
   });
 
   it('rejects development URLs without a _dev database suffix', () => {
+
+  it('rejects explicit URLs that do not target test databases', () => {
+    process.env.TEST_DATABASE_URL = 'postgres://user:password@localhost:5432/stackstorm_dev';
+
+    expect(() => databaseConfig.test.url).toThrow(
+      'TEST_DATABASE_URL must target testdb or a database whose name ends in _test'
+    );
+  });
+
+  it('rejects database URLs without a recognized test or development suffix', () => {
+ develop
     process.env.DATABASE_URL = 'postgres://user:password@localhost:5432/stackstorm';
 
     expect(() => databaseConfig.test.url).toThrow(
@@ -56,7 +68,11 @@ describe('test database configuration', () => {
     );
   });
 
+ feature/38-refresh-logout
   it('requires a configured URL when no development URL exists', () => {
+
+  it('requires a URL when neither a test nor development URL is set', () => {
+ develop
     delete process.env.DATABASE_URL;
 
     expect(() => databaseConfig.test.url).toThrow(

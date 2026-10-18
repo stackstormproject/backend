@@ -1,4 +1,3 @@
-
 const { body } = require('express-validator');
 const validate = require('../../../src/middleware/validate');
 const AppError = require('../../../src/utils/AppError');
@@ -19,10 +18,7 @@ describe('validate middleware', () => {
   it('passes a validation error with field details to next', async () => {
     const req = { body: { email: 'not-an-email' } };
 
-    await body('email')
-      .isEmail()
-      .withMessage('Invalid email')
-      .run(req);
+    await body('email').isEmail().withMessage('Invalid email').run(req);
 
     const next = jest.fn();
 
@@ -33,9 +29,7 @@ describe('validate middleware', () => {
       statusCode: 400,
       code: 'VALIDATION_ERROR',
       message: 'Invalid input data.',
-      details: [
-        { field: 'email', message: 'Invalid email' },
-      ],
+      details: [{ field: 'email', message: 'Invalid email' }],
     });
   });
 
@@ -47,15 +41,9 @@ describe('validate middleware', () => {
       },
     };
 
-    await body('email')
-      .isEmail()
-      .withMessage('A valid email is required')
-      .run(req);
+    await body('email').isEmail().withMessage('A valid email is required').run(req);
 
-    await body('password')
-      .notEmpty()
-      .withMessage('Password is required')
-      .run(req);
+    await body('password').notEmpty().withMessage('Password is required').run(req);
 
     const next = jest.fn();
 

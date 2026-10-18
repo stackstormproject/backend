@@ -32,6 +32,7 @@ Node.js 20, Express 4, Sequelize 6, PostgreSQL 17, Redis 7, Jest and Supertest.
 
 `npm run lint`, `npm run format:check`, `npm run test:unit`, `npm run test:integration`
 
+feature/38-refresh-logout
 Integration tests use `TEST_DATABASE_URL`, which must point to a dedicated PostgreSQL
 database whose name ends in `_test`. If it is unset, the test configuration derives it
 from `DATABASE_URL` only when that URL's database name ends in `_dev` (for example,
@@ -39,6 +40,12 @@ from `DATABASE_URL` only when that URL's database name ends in `_dev` (for examp
 `testdb` used by CI. The integration setup runs migrations and truncates test tables,
 so do not point it at a development or production database.
 Run `npm run test:integration` before `npx jest --coverage` to apply those migrations.
+
+Integration tests use `TEST_DATABASE_URL` when set; otherwise, they derive a separate
+database ending in `_test` from a `DATABASE_URL` ending in `_dev`. The legacy database
+name `testdb` is also accepted. Migrations and test cleanup run against this database,
+so do not configure it to point to a development or production database.
+develop
 
 ## Branches and pull requests
 
