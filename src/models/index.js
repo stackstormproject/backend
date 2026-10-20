@@ -6,6 +6,7 @@ const CustomerModel = require('./Customer');
 const RefreshTokenModel = require('./RefreshToken');
 const AddressModel = require('./Address');
 const ProductModel = require('./Product');
+const CategoryModel = require('./Category');
 const ProductVariantModel = require('./ProductVariant');
 const ProductImageModel = require('./ProductImage');
 const PromoCodeModel = require('./PromoCode');
@@ -34,6 +35,7 @@ const models = {
   RefreshToken: RefreshTokenModel(sequelize),
   Address: AddressModel(sequelize),
   Product: ProductModel(sequelize),
+  Category: CategoryModel(sequelize),
   ProductVariant: ProductVariantModel(sequelize),
   ProductImage: ProductImageModel(sequelize),
   PromoCode: PromoCodeModel(sequelize),
