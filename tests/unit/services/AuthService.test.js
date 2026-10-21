@@ -1,6 +1,7 @@
 jest.mock('../../../src/models', () => ({
   sequelize: { transaction: jest.fn() },
   Customer: { create: jest.fn(), findOne: jest.fn() },
+  Admin: { findOne: jest.fn() },
   Loyalty: { create: jest.fn() },
   RefreshToken: { create: jest.fn() },
 }));
@@ -19,7 +20,7 @@ jest.mock('../../../src/config/logger', () => ({
   error: jest.fn(),
 }));
 
-const { sequelize, Customer, Loyalty, RefreshToken } = require('../../../src/models');
+const { sequelize, Customer, Admin, Loyalty, RefreshToken } = require('../../../src/models');
 const { hashPassword, comparePassword } = require('../../../src/utils/passwordHash');
 const {
   generateAccessToken,
@@ -222,4 +223,36 @@ describe('AuthService', () => {
       { transaction: undefined }
     );
   });
+
+  it('logs in an admin user and issues an admin session', async () => {
+    const admin = {
+      id: 99,
+      name: 'Super Admin',
+      email: 'admin@stackstorm.lk',
+      passwordHash: 'hashed-secret',
+      role: 'superadmin',
+      failedLoginAttempts: 0,
+      lockedUntil: null,
+      update: jest.fn().mockResolvedValue(true),
+    };
+    Admin.findOne.mockResolvedValue(admin);
+    comparePassword.mockResolvedValue(true);
+    generateAccessToken.mockReturnValue('admin-access-token');
+    generateRefreshToken.mockReturnValue({
+      rawToken: 'admin-refresh-token',
+      tokenHash: 'hashed-refresh-token',
+    });
+    getRefreshTtlMs.mockReturnValue(7 * 24 * 60 * 60 * 1000);
+
+    const result = await AuthService.loginAdmin('admin@stackstorm.lk', 'AdminPass123!');
+
+    expect(result.admin).toEqual({
+      id: 99,
+      name: 'Super Admin',
+      email: 'admin@stackstorm.lk',
+      role: 'superadmin',
+    });
+    expect(result.accessToken).toBe('admin-access-token');
+  });
 });
+
