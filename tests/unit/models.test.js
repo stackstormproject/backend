@@ -8,10 +8,17 @@ describe('models', () => {
     await models.sequelize.close();
   });
 
-  it('should register 22 models given the model index loads', () => {
+  it('should register 23 models given the model index loads', () => {
     const names = Object.keys(models).filter((key) => !['sequelize', 'Sequelize'].includes(key));
 
-    expect(names).toHaveLength(22);
+    expect(names).toHaveLength(23);
+    expect(names).toContain('Category');
+  });
+
+  it('should register category model with parent and children associations', () => {
+    expect(models.Category.tableName).toBe('categories');
+    expect(models.Category.associations.children).toBeDefined();
+    expect(models.Category.associations.parent).toBeDefined();
   });
 
   it('should register refresh tokens with mapped fields and owner associations', () => {
