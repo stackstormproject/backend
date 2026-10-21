@@ -53,7 +53,11 @@ describe('GET /api/v1/categories - Cache-Aside & Hierarchy Integration', () => {
   afterAll(async () => {
     jest.restoreAllMocks();
     try {
-      await redisClient.quit();
+      if (redisClient.status === 'ready') {
+        await redisClient.quit();
+      } else {
+        redisClient.disconnect();
+      }
     } catch (e) {
       // Ignore disconnect error in tests
     }
