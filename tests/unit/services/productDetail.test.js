@@ -3,8 +3,11 @@ const {
   formatVariant,
   slugify,
   getProductBySlug,
+  updateProduct,
+  deleteProduct,
 } = require('../../../src/services/product.service');
 const { Product } = require('../../../src/models');
+const cacheService = require('../../../src/services/cache.service');
 
 describe('productDetail Service - Variant Matrix & Stock Availability', () => {
   describe('calculateAvailableStock', () => {
@@ -142,6 +145,62 @@ describe('productDetail Service - Variant Matrix & Stock Availability', () => {
       expect(result.images).toHaveLength(1);
       expect(result.images[0].imageUrl).toBe('https://cdn.example.com/primary.jpg');
       expect(result.images[0].isPrimary).toBe(true);
+    });
+  });
+
+  describe('updateProduct', () => {
+    it('should update product attributes and invalidate product cache', async () => {
+      const mockProduct = {
+        id: 1,
+        slug: 'shirt',
+        update: jest.fn().mockImplementation(function (data) {
+          Object.assign(this, data);
+          return Promise.resolve(this);
+        }),
+      };
+
+      jest.spyOn(Product, 'findByPk').mockResolvedValue(mockProduct);
+      const invalidateSpy = jest.spyOn(cacheService, 'invalidateProductCache').mockResolvedValue();
+
+      const result = await updateProduct(1, { price: 3000, slug: 'shirt-new' });
+
+      expect(result.price).toBe(3000);
+      expect(mockProduct.update).toHaveBeenCalledWith({ price: 3000, slug: 'shirt-new' });
+      expect(invalidateSpy).toHaveBeenCalledWith(1, 'shirt');
+      expect(invalidateSpy).toHaveBeenCalledWith(1, 'shirt-new');
+    });
+
+    it('should throw not found when updating a non-existent product', async () => {
+      jest.spyOn(Product, 'findByPk').mockResolvedValue(null);
+
+      await expect(updateProduct(999, { price: 1000 })).rejects.toThrow(
+        'Product not found with id: 999'
+      );
+    });
+  });
+
+  describe('deleteProduct', () => {
+    it('should destroy product and invalidate product cache', async () => {
+      const mockProduct = {
+        id: 1,
+        slug: 'shirt',
+        destroy: jest.fn().mockResolvedValue(true),
+      };
+
+      jest.spyOn(Product, 'findByPk').mockResolvedValue(mockProduct);
+      const invalidateSpy = jest.spyOn(cacheService, 'invalidateProductCache').mockResolvedValue();
+
+      const result = await deleteProduct(1);
+
+      expect(result).toBe(true);
+      expect(mockProduct.destroy).toHaveBeenCalled();
+      expect(invalidateSpy).toHaveBeenCalledWith(1, 'shirt');
+    });
+
+    it('should throw not found when deleting a non-existent product', async () => {
+      jest.spyOn(Product, 'findByPk').mockResolvedValue(null);
+
+      await expect(deleteProduct(999)).rejects.toThrow('Product not found with id: 999');
     });
   });
 });
