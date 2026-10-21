@@ -56,7 +56,37 @@ const getProducts = async (req, res, next) => {
   }
 };
 
+/**
+ * Controller for updating an existing product with automatic cache eviction.
+ * E.g., PUT /api/v1/products/:id
+ */
+const updateProduct = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    const product = await productService.updateProduct(id, req.body);
+    return successResponse(res, product, 'Product updated successfully', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Controller for deleting an existing product with automatic cache eviction.
+ * E.g., DELETE /api/v1/products/:id
+ */
+const deleteProduct = async (req, res, next) => {
+  try {
+    const { id } = req.params;
+    await productService.deleteProduct(id);
+    return successResponse(res, null, 'Product deleted successfully', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   getProductBySlug,
   getProducts,
+  updateProduct,
+  deleteProduct,
 };
