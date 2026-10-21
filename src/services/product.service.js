@@ -6,6 +6,8 @@
 
 const { Op, Sequelize } = require('sequelize');
 const { Product, ProductVariant, ProductImage, Category, Review } = require('../models');
+const ApiError = require('../utils/ApiError');
+const cacheService = require('./cache.service');
 
 /**
  * Normalizes text to a URL-safe slug.
@@ -59,13 +61,12 @@ function formatVariant(variant) {
 }
 
 /**
- * Retrieves full product details by SEO slug with eager-loaded variants,
- * gallery images, category information, and review summary statistics.
+ * Fetches full product details from PostgreSQL database.
  *
  * @param {string} slug - Product SEO slug or identifier
  * @returns {Promise<object|null>} Complete product detail or null
  */
-const getProductBySlug = async (slug) => {
+const fetchProductDetailFromDb = async (slug) => {
   if (!slug) return null;
 
   const whereConditions = [{ slug }];
@@ -171,6 +172,62 @@ const getProductBySlug = async (slug) => {
     },
     reviews,
   };
+};
+
+/**
+ * Retrieves full product details by SEO slug with Cache-Aside pattern.
+ *
+ * @param {string} slug - Product SEO slug or identifier
+ * @returns {Promise<object|null>} Complete product detail or null
+ */
+const getProductBySlug = async (slug) => {
+  if (!slug) return null;
+  const cacheKey = `cache:product:slug:${slug}`;
+  return cacheService.getOrSet(cacheKey, 3600, () => fetchProductDetailFromDb(slug));
+};
+
+/**
+ * Updates product details and purges matching Redis cache keys.
+ *
+ * @param {number|string} id - Product ID
+ * @param {object} data - Updated attributes
+ * @returns {Promise<object>} Updated product instance
+ */
+const updateProduct = async (id, data) => {
+  const product = await Product.findByPk(id);
+  if (!product) {
+    throw ApiError.notFound(`Product not found with id: ${id}`);
+  }
+
+  const oldSlug = product.slug;
+  await product.update(data);
+  const newSlug = product.slug;
+
+  await cacheService.invalidateProductCache(id, oldSlug);
+  if (newSlug && newSlug !== oldSlug) {
+    await cacheService.invalidateProductCache(id, newSlug);
+  }
+
+  return product;
+};
+
+/**
+ * Deletes a product and purges matching Redis cache keys.
+ *
+ * @param {number|string} id - Product ID
+ * @returns {Promise<boolean>} True if deleted
+ */
+const deleteProduct = async (id) => {
+  const product = await Product.findByPk(id);
+  if (!product) {
+    throw ApiError.notFound(`Product not found with id: ${id}`);
+  }
+
+  const { slug } = product;
+  await product.destroy();
+
+  await cacheService.invalidateProductCache(id, slug);
+  return true;
 };
 
 /**
@@ -318,6 +375,10 @@ module.exports = {
   slugify,
   calculateAvailableStock,
   formatVariant,
+  fetchProductDetailFromDb,
   getProductBySlug,
+  updateProduct,
+  deleteProduct,
+  invalidateProductCache: cacheService.invalidateProductCache,
   listProducts,
 };
