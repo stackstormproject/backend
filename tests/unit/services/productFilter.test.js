@@ -1,5 +1,5 @@
 const { listProducts } = require('../../../src/services/product.service');
-const { Product } = require('../../../src/models');
+const { Product, Category } = require('../../../src/models');
 
 describe('productFilter Service - Multi-Faceted Query Builder & Pagination', () => {
   afterEach(() => {
@@ -62,5 +62,45 @@ describe('productFilter Service - Multi-Faceted Query Builder & Pagination', () 
     expect(variantInclude.where.size).toBe('L');
     expect(variantInclude.where.color).toBe('Navy');
     expect(variantInclude.required).toBe(true);
+  });
+
+  it('should filter by search keyword across name and description', async () => {
+    const spy = jest.spyOn(Product, 'findAndCountAll').mockResolvedValue({
+      count: 0,
+      rows: [],
+    });
+
+    await listProducts({ search: 'batik' });
+
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('should filter by categoryId and resolve child categories', async () => {
+    jest.spyOn(Category, 'findAll').mockResolvedValue([{ id: 10 }]);
+    const spy = jest.spyOn(Product, 'findAndCountAll').mockResolvedValue({
+      count: 0,
+      rows: [],
+    });
+
+    await listProducts({ categoryId: 1 });
+
+    expect(spy).toHaveBeenCalled();
+  });
+
+  it('should support price_asc, price_desc and inStock filter', async () => {
+    const spy = jest.spyOn(Product, 'findAndCountAll').mockResolvedValue({
+      count: 0,
+      rows: [],
+    });
+
+    await listProducts({ sort: 'price_asc', inStock: true });
+
+    expect(spy).toHaveBeenCalled();
+    let queryArg = spy.mock.calls[0][0];
+    expect(queryArg.order).toEqual([['price', 'ASC']]);
+
+    await listProducts({ sort: 'price_desc' });
+    queryArg = spy.mock.calls[1][0];
+    expect(queryArg.order).toEqual([['price', 'DESC']]);
   });
 });
