@@ -8,7 +8,7 @@ const redisClient = new Redis(redisUrl, {
   maxRetriesPerRequest: 1,
   enableOfflineQueue: false,
   retryStrategy(times) {
-    if (times > 3) {
+    if (process.env.NODE_ENV === 'test' || times > 3) {
       logger.warn(
         '[REDIS] Max reconnect attempts reached. Operating in database-only fallback mode.'
       );
@@ -31,10 +31,12 @@ redisClient.on('error', (err) => {
 });
 
 // Attempt initial connection without blocking app boot if Redis is offline
-redisClient.connect().catch((err) => {
-  logger.warn(
-    `[REDIS] Initial connection failed (${err.message}). Application will fall back to database.`
-  );
-});
+if (process.env.NODE_ENV !== 'test') {
+  redisClient.connect().catch((err) => {
+    logger.warn(
+      `[REDIS] Initial connection failed (${err.message}). Application will fall back to database.`
+    );
+  });
+}
 
 module.exports = redisClient;
