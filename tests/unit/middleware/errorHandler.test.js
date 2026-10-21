@@ -97,4 +97,49 @@ describe('errorHandler', () => {
     notFound(req, makeRes(), next);
     expect(next.mock.calls[0][0].statusCode).toBe(404);
   });
+
+  it('should handle MulterError LIMIT_FILE_SIZE with 400 status', () => {
+    const res = makeRes();
+    const err = new Error('File too large');
+    err.name = 'MulterError';
+    err.code = 'LIMIT_FILE_SIZE';
+
+    errorHandler(err, req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'LIMIT_FILE_SIZE',
+      message: 'File too large. Maximum allowed size is 5MB.',
+    });
+  });
+
+  it('should handle MulterError LIMIT_FILE_COUNT with 400 status', () => {
+    const res = makeRes();
+    const err = new Error('Too many files');
+    err.name = 'MulterError';
+    err.code = 'LIMIT_FILE_COUNT';
+
+    errorHandler(err, req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'LIMIT_FILE_COUNT',
+      message: 'Too many files. Maximum allowed is 5 files.',
+    });
+  });
+
+  it('should handle generic MulterError with 400 status', () => {
+    const res = makeRes();
+    const err = new Error('Unexpected field');
+    err.name = 'MulterError';
+    err.code = 'LIMIT_UNEXPECTED_FILE';
+
+    errorHandler(err, req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
+    expect(res.json).toHaveBeenCalledWith({
+      error: 'LIMIT_UNEXPECTED_FILE',
+      message: 'Unexpected field',
+    });
+  });
 });
