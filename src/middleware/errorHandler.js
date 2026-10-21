@@ -38,6 +38,21 @@ function errorHandler(err, req, res, next) {
   } else if (err.type === 'entity.too.large') {
     status = 413;
     body = { error: 'PAYLOAD_TOO_LARGE', message: 'Request body is too large.' };
+  } else if (err.name === 'MulterError') {
+    status = 400;
+    if (err.code === 'LIMIT_FILE_SIZE') {
+      body = {
+        error: 'LIMIT_FILE_SIZE',
+        message: 'File too large. Maximum allowed size is 5MB.',
+      };
+    } else if (err.code === 'LIMIT_FILE_COUNT') {
+      body = {
+        error: 'LIMIT_FILE_COUNT',
+        message: 'Too many files. Maximum allowed is 5 files.',
+      };
+    } else {
+      body = { error: err.code, message: err.message };
+    }
   }
   if (status >= 500) {
     logger.error('Unhandled error', {
