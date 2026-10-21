@@ -75,4 +75,18 @@ describe('POST /api/v1/upload/images - Media Pipeline Integration', () => {
     expect(res.body.success).toBe(true);
     expect(res.body.data.urls).toHaveLength(2);
   });
+
+  afterAll(async () => {
+    jest.restoreAllMocks();
+    try {
+      const redisClient = require('../../src/config/redis');
+      if (redisClient.status === 'ready') {
+        await redisClient.quit();
+      } else {
+        redisClient.disconnect();
+      }
+    } catch {
+      // Ignore disconnect error in tests
+    }
+  });
 });
