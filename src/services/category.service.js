@@ -8,6 +8,7 @@ const { Category } = require('../models');
 const redisClient = require('../config/redis');
 const logger = require('../config/logger');
 const ApiError = require('../utils/ApiError');
+const cacheService = require('./cache.service');
 
 const CACHE_KEY = 'cache:categories:tree';
 const CACHE_TTL_SECONDS = 86400; // 24 hours
@@ -113,6 +114,7 @@ const getCategoryTree = async () => {
 const invalidateCache = async () => {
   try {
     await redisClient.del(CACHE_KEY);
+    await cacheService.invalidateCategoryCache();
     logger.info('[CATEGORY] Redis category cache invalidated successfully');
   } catch (err) {
     logger.warn(`[CATEGORY] Failed to invalidate Redis category cache: ${err.message}`);
