@@ -194,7 +194,24 @@ const listProducts = async ({
   const variantWhere = {};
 
   if (categoryId) {
-    productWhere.categoryId = categoryId;
+    let categoryIds = [categoryId];
+    try {
+      if (Category) {
+        const subCategories = await Category.findAll({
+          where: { parentId: categoryId, isActive: true },
+          attributes: ['id'],
+        });
+        if (subCategories && subCategories.length > 0) {
+          categoryIds = categoryIds.concat(subCategories.map((c) => c.id));
+        }
+      }
+    } catch (e) {
+      // Fall back to direct categoryId
+    }
+    productWhere[Op.or] = [
+      { categoryId: { [Op.in]: categoryIds } },
+      { category: String(categoryId) },
+    ];
   }
 
   if (minPrice !== undefined || maxPrice !== undefined) {
@@ -216,6 +233,13 @@ const listProducts = async ({
 
   if (color) {
     variantWhere.color = color;
+  }
+
+  // Ensure available stock > 0 when filtering on variant attributes
+  if (size || color) {
+    variantWhere[Op.and] = Sequelize.literal(
+      '"variants"."stock_quantity" - "variants"."reserved_quantity" > 0'
+    );
   }
 
   const SORT_MAP = {
