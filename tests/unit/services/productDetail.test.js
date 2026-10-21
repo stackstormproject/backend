@@ -111,5 +111,37 @@ describe('productDetail Service - Variant Matrix & Stock Availability', () => {
       expect(result.reviewsSummary.averageRating).toBe(4.5);
       expect(result.reviewsSummary.reviewCount).toBe(2);
     });
+
+    it('should return null when slug is empty or falsy', async () => {
+      const result = await getProductBySlug('');
+      expect(result).toBeNull();
+    });
+
+    it('should query with numeric id when slug is numeric', async () => {
+      const findOneSpy = jest.spyOn(Product, 'findOne').mockResolvedValue(null);
+
+      await getProductBySlug('123');
+
+      expect(findOneSpy).toHaveBeenCalled();
+    });
+
+    it('should fallback to primaryImage when variants have no images', async () => {
+      const mockProduct = {
+        id: 2,
+        name: 'Plain Shirt',
+        slug: 'plain-shirt',
+        primaryImage: 'https://cdn.example.com/primary.jpg',
+        variants: [],
+        reviews: [],
+      };
+
+      jest.spyOn(Product, 'findOne').mockResolvedValue(mockProduct);
+
+      const result = await getProductBySlug('plain-shirt');
+
+      expect(result.images).toHaveLength(1);
+      expect(result.images[0].imageUrl).toBe('https://cdn.example.com/primary.jpg');
+      expect(result.images[0].isPrimary).toBe(true);
+    });
   });
 });
