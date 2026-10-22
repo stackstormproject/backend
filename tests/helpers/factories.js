@@ -33,4 +33,13 @@ const createTestVariant = async ({ stockQuantity = 10, reservedQuantity = 0 } = 
   return ProductVariant.findByPk(variant.id);
 };
 
-module.exports = { createTestVariant };
+const createTestCustomer = async () => {
+  const [c] = await sequelize.query(
+    `INSERT INTO customers (email, hashed_password, name)
+     VALUES (:email, 'x', 'Test User') RETURNING id`,
+    { replacements: { email: `t-${unique()}@test.lk` }, type: QueryTypes.SELECT }
+  );
+  return c;
+};
+
+module.exports = { createTestVariant, createTestCustomer };
