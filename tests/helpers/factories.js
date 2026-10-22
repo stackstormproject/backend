@@ -1,8 +1,8 @@
-const { sequelize, ProductVariant } = require('../../src/models');
+const crypto = require('crypto');
 const { QueryTypes } = require('sequelize');
+const { sequelize, ProductVariant } = require('../../src/models');
 
-let counter = 0;
-const unique = () => `${Date.now()}-${(counter += 1)}`;
+const unique = () => crypto.randomUUID();
 
 /**
  * Inserts a product and a variant using raw SQL (column names from the current schema),
