@@ -1,15 +1,14 @@
 process.env.RESERVE_RATE_LIMIT = '1000';
 
 const express = require('express');
-const jwt = require('jsonwebtoken');
 const request = require('supertest');
 const app = require('../../../src/app');
 const { sequelize } = require('../../../src/models');
-const { createReserveLimiter } = require('../../../src/middleware/reserveLimiter');
+const { createReserveLimiter } = require('../../../src/middleware/rateLimiter');
+const { generateAccessToken } = require('../../../src/utils/tokenGenerator');
 const { createTestVariant, createTestCustomer } = require('../../helpers/factories');
 
-const tokenFor = (id, role = 'customer') =>
-  jwt.sign({ id, role }, process.env.JWT_SECRET || 'test-secret');
+const tokenFor = (userId, role = 'customer') => generateAccessToken(userId, role);
 const reserve = (token, items) =>
   request(app)
     .post('/api/v1/inventory/reserve')
@@ -99,6 +98,8 @@ describe('Reservation API', () => {
   });
 
   it('should return 429 after the limit is exceeded (AC4)', async () => {
+    const previousRateLimitSetting = process.env.DISABLE_RATE_LIMIT;
+    process.env.DISABLE_RATE_LIMIT = 'false';
     const tiny = express();
     tiny.use((req, res, next) => {
       req.user = { id: 1 };
@@ -106,10 +107,18 @@ describe('Reservation API', () => {
     });
     tiny.post('/x', createReserveLimiter({ limit: 2 }), (req, res) => res.json({ ok: true }));
 
-    await request(tiny).post('/x');
-    await request(tiny).post('/x');
-    const third = await request(tiny).post('/x');
+    try {
+      await request(tiny).post('/x');
+      await request(tiny).post('/x');
+      const third = await request(tiny).post('/x');
 
-    expect(third.status).toBe(429);
+      expect(third.status).toBe(429);
+    } finally {
+      if (previousRateLimitSetting === undefined) {
+        delete process.env.DISABLE_RATE_LIMIT;
+      } else {
+        process.env.DISABLE_RATE_LIMIT = previousRateLimitSetting;
+      }
+    }
   });
 });

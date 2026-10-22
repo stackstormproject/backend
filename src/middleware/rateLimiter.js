@@ -1,4 +1,5 @@
 const rateLimit = require('express-rate-limit');
+const { ipKeyGenerator } = require('express-rate-limit');
 
 function createLimiter({ windowMs, limit, message, skipSuccessfulRequests = false, keyGenerator }) {
   return rateLimit({
@@ -57,7 +58,8 @@ const createReserveLimiter = ({ limit = Number(process.env.RESERVE_RATE_LIMIT) |
     windowMs: ONE_MINUTE,
     limit,
     message: 'Too many reservation attempts. Please wait a minute.',
-    keyGenerator: (req) => (req.user ? `customer:${req.user.id}` : req.ip),
+    keyGenerator: (req) =>
+      req.user ? `customer:${req.user.userId ?? req.user.id}` : ipKeyGenerator(req.ip),
   });
 
 const reserveLimiter = createReserveLimiter();

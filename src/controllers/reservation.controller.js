@@ -3,7 +3,7 @@ const { successResponse } = require('../utils/responseFormatter');
 
 const reserve = async (req, res, next) => {
   try {
-    const customerId = Number(req.user.id);
+    const customerId = Number(req.user.userId ?? req.user.id);
     // Anti-hoarding: drop any earlier hold before taking a new one
     await reservationService.releaseCustomerActiveReservations(customerId);
     const result = await reservationService.reserveStock({
@@ -19,7 +19,7 @@ const reserve = async (req, res, next) => {
 const release = async (req, res, next) => {
   try {
     const released = await reservationService.releaseReservation(req.params.id, {
-      customerId: Number(req.user.id), // ownership enforced in the service (403)
+      customerId: Number(req.user.userId ?? req.user.id), // ownership enforced in the service (403)
     });
     if (!released) {
       return res.status(409).json({
