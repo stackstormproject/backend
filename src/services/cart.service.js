@@ -91,4 +91,87 @@ const removeItem = async (owner, itemId) => {
   return true;
 };
 
-module.exports = { getCart, addItem, updateItem, removeItem };
+/**
+ * Moves a guest cart's items into the customer's cart inside one transaction.
+ * - Overlapping SKUs are summed, then capped to available stock.
+ * - Merging never reduces a quantity the customer already had.
+ * - The guest cart is deleted, so replaying the same token is a no-op.
+ */
+const mergeGuestCart = async (customerId, sessionToken) => {
+  const t = await sequelize.transaction();
+  try {
+    // Lock the guest cart: two concurrent merges of one token are serialised
+    const guestCart = await Cart.findOne({
+      where: { sessionToken },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+    if (!guestCart) {
+      await t.commit();
+      return { mergedCount: 0, clamped: [] };
+    }
+
+    const userCart = await getOrCreateCart({ customerId }, t);
+
+    // Deterministic order avoids deadlocks between concurrent merges
+    const guestItems = await CartItem.findAll({
+      where: { cartId: guestCart.id },
+      order: [['productVariantId', 'ASC']],
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+
+    const clamped = [];
+
+    for (const guestItem of guestItems) {
+      // eslint-disable-next-line no-await-in-loop
+      const variant = await ProductVariant.findByPk(guestItem.productVariantId, { transaction: t });
+      const available = variant ? availableOf(variant) : 0;
+
+      // eslint-disable-next-line no-await-in-loop
+      const existing = await CartItem.findOne({
+        where: { cartId: userCart.id, productVariantId: guestItem.productVariantId },
+        transaction: t,
+        lock: t.LOCK.UPDATE,
+      });
+
+      const existingQty = existing ? existing.quantity : 0;
+      const desired = existingQty + guestItem.quantity;
+      const finalQty = Math.max(existingQty, Math.min(desired, available));
+
+      if (finalQty < desired) {
+        clamped.push({
+          productVariantId: guestItem.productVariantId,
+          requested: desired,
+          applied: finalQty,
+        });
+      }
+
+      if (existing) {
+        existing.quantity = finalQty;
+        // eslint-disable-next-line no-await-in-loop
+        await existing.save({ transaction: t });
+        // eslint-disable-next-line no-await-in-loop
+        await guestItem.destroy({ transaction: t });
+      } else if (finalQty > 0) {
+        guestItem.cartId = userCart.id;
+        guestItem.quantity = finalQty;
+        // eslint-disable-next-line no-await-in-loop
+        await guestItem.save({ transaction: t });
+      } else {
+        // Nothing purchasable and nothing to merge into: drop it
+        // eslint-disable-next-line no-await-in-loop
+        await guestItem.destroy({ transaction: t });
+      }
+    }
+
+    await guestCart.destroy({ transaction: t });
+    await t.commit();
+    return { mergedCount: guestItems.length, clamped };
+  } catch (err) {
+    await t.rollback();
+    throw err;
+  }
+};
+
+module.exports = { getCart, addItem, updateItem, removeItem, mergeGuestCart };
