@@ -72,7 +72,9 @@ describe('Cart merge', () => {
     const replay = await cartService.mergeGuestCart(customer.id, TOKEN);
 
     expect(replay.mergedCount).toBe(0);
-    expect((await cartService.mergeGuestCart(customer.id, 'guest_doesnotexist12345')).mergedCount).toBe(0);
+    expect(
+      (await cartService.mergeGuestCart(customer.id, 'guest_doesnotexist12345')).mergedCount
+    ).toBe(0);
   });
 
   it('should roll back everything given a failure mid-merge (AC5)', async () => {
@@ -89,7 +91,10 @@ describe('Cart merge', () => {
   });
 
   it('should return 401 given a guest token but no login (AC6)', async () => {
-    const res = await request(app).post('/api/v1/cart/merge').set('X-Session-Token', TOKEN).send({});
+    const res = await request(app)
+      .post('/api/v1/cart/merge')
+      .set('X-Session-Token', TOKEN)
+      .send({});
     expect(res.status).toBe(401);
   });
 

@@ -1,5 +1,9 @@
 const router = require('express').Router();
-const { optionalAuth, resolveCartIdentity, requireCustomer } = require('../middleware/cartIdentity');
+const {
+  optionalAuth,
+  resolveCartIdentity,
+  requireCustomer,
+} = require('../middleware/cartIdentity');
 const controller = require('../controllers/cart.controller');
 
 router.use(optionalAuth);
