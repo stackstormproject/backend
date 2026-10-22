@@ -17,6 +17,11 @@ module.exports = (sequelize) => {
         allowNull: true,
         field: 'customer_id',
       },
+      sessionToken: {
+        type: DataTypes.STRING(64),
+        allowNull: true,
+        field: 'session_token',
+      },
       promoCodeId: {
         type: DataTypes.INTEGER,
         allowNull: true,
