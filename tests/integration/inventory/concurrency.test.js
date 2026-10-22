@@ -1,10 +1,10 @@
 process.env.RESERVE_RATE_LIMIT = '1000';
 
-const jwt = require('jsonwebtoken');
 const request = require('supertest');
 const { QueryTypes } = require('sequelize');
 const app = require('../../../src/app');
 const { sequelize } = require('../../../src/models');
+const { generateAccessToken } = require('../../../src/utils/tokenGenerator');
 const {
   reserveStock,
   confirmReservation,
@@ -20,8 +20,7 @@ const stockOf = async (id) => {
   return row;
 };
 
-const tokenFor = (id) =>
-  jwt.sign({ id, role: 'customer' }, process.env.JWT_SECRET || 'test-secret');
+const tokenFor = (userId) => generateAccessToken(userId, 'customer');
 
 describe('Concurrency (real Postgres)', () => {
   afterAll(async () => {
