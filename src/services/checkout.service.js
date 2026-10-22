@@ -10,7 +10,7 @@ const ApiError = require('../utils/ApiError');
 
 // Business Rule Constants
 const FREE_SHIPPING_THRESHOLD_LKR = 10000.0; // 10,000 LKR
-const STANDARD_SHIPPING_FEE_LKR = 450.0;     // 450 LKR flat rate
+const STANDARD_SHIPPING_FEE_LKR = 450.0; // 450 LKR flat rate
 
 /**
  * Validates Sri Lankan shipping destination address attributes.
