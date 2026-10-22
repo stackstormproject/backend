@@ -31,8 +31,14 @@ describe('reserveStock concurrency (real Postgres)', () => {
         reserveStock({
           items:
             i % 2 === 0
-              ? [{ variant_id: a.id, quantity: 1 }, { variant_id: b.id, quantity: 1 }]
-              : [{ variant_id: b.id, quantity: 1 }, { variant_id: a.id, quantity: 1 }],
+              ? [
+                  { variant_id: a.id, quantity: 1 },
+                  { variant_id: b.id, quantity: 1 },
+                ]
+              : [
+                  { variant_id: b.id, quantity: 1 },
+                  { variant_id: a.id, quantity: 1 },
+                ],
         })
       )
     );
