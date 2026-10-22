@@ -123,6 +123,8 @@ const mergeGuestCart = async (customerId, sessionToken) => {
 
     const clamped = [];
 
+    // Sequential on purpose: every step uses the same transaction
+    // eslint-disable-next-line no-restricted-syntax
     for (const guestItem of guestItems) {
       // eslint-disable-next-line no-await-in-loop
       const variant = await ProductVariant.findByPk(guestItem.productVariantId, { transaction: t });
