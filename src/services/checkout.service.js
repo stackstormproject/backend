@@ -5,7 +5,7 @@
 // ==============================================================================
 
 // const { Order, OrderItem, ProductVariant, Product, sequelize } = require('../models');
-const reservationService = require('./reservation.service');
+// const reservationService = require('./reservation.service');
 const ApiError = require('../utils/ApiError');
 
 // Business Rule Constants
