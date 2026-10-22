@@ -1,16 +1,20 @@
+const crypto = require('crypto');
 const request = require('supertest');
 const app = require('../../../src/app');
 const { Cart, CartItem, sequelize } = require('../../../src/models');
 const { createTestVariant } = require('../../helpers/factories');
 
-const TOKEN = 'guest_abcdef1234567890';
-const post = (body, token = TOKEN) =>
-  request(app).post('/api/v1/cart/items').set('X-Session-Token', token).send(body);
+let token;
+const post = (body, sessionToken = token) =>
+  request(app).post('/api/v1/cart/items').set('X-Session-Token', sessionToken).send(body);
 
 describe('Cart API', () => {
+  beforeEach(() => {
+    token = `guest_${crypto.randomUUID().replace(/-/g, '')}`;
+  });
+
   afterEach(async () => {
-    await CartItem.destroy({ where: {} });
-    await Cart.destroy({ where: {} });
+    await Cart.destroy({ where: { sessionToken: token } });
   });
 
   afterAll(async () => {
@@ -23,7 +27,7 @@ describe('Cart API', () => {
     const res = await post({ variant_id: v.id, quantity: 2 });
 
     expect(res.status).toBe(201);
-    const cart = await Cart.findOne({ where: { sessionToken: TOKEN } });
+    const cart = await Cart.findOne({ where: { sessionToken: token } });
     expect(cart.customerId).toBeNull();
     const row = await CartItem.findOne({ where: { cartId: cart.id } });
     expect(row.quantity).toBe(2);
@@ -35,7 +39,8 @@ describe('Cart API', () => {
     await post({ variant_id: v.id, quantity: 1 });
     await post({ variant_id: v.id, quantity: 2 });
 
-    const rows = await CartItem.findAll();
+    const cart = await Cart.findOne({ where: { sessionToken: token } });
+    const rows = await CartItem.findAll({ where: { cartId: cart.id } });
     expect(rows).toHaveLength(1);
     expect(rows[0].quantity).toBe(3);
   });
@@ -52,7 +57,8 @@ describe('Cart API', () => {
 
     expect((await post({ variant_id: v.id, quantity: 0 })).status).toBe(400);
     expect((await post({ variant_id: v.id, quantity: 1.5 })).status).toBe(400);
-    expect(await CartItem.count()).toBe(0);
+    const cart = await Cart.findOne({ where: { sessionToken: token } });
+    expect(await CartItem.count({ where: { cartId: cart?.id || -1 } })).toBe(0);
   });
 
   it('should return 404 given an unknown variant (AC4)', async () => {
@@ -78,7 +84,8 @@ describe('Cart API', () => {
       post({ variant_id: v.id, quantity: 1 }),
     ]);
 
-    const rows = await CartItem.findAll();
+    const cart = await Cart.findOne({ where: { sessionToken: token } });
+    const rows = await CartItem.findAll({ where: { cartId: cart.id } });
     expect(rows).toHaveLength(1);
     expect(rows[0].quantity).toBe(2);
   });
