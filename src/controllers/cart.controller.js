@@ -18,7 +18,12 @@ const addItem = async (req, res, next) => {
   try {
     const { variant_id: variantId, quantity } = req.body;
     if (!isId(variantId) || !validQty(quantity)) {
-      return errorResponse(res, 'variant_id must be a positive integer and quantity an integer 1-99', [], 400);
+      return errorResponse(
+        res,
+        'variant_id must be a positive integer and quantity an integer 1-99',
+        [],
+        400
+      );
     }
     const item = await cartService.addItem(req.cartOwner, variantId, quantity);
     return successResponse(res, { item }, 'Item added to cart', 201);
