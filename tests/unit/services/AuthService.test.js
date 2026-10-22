@@ -255,4 +255,3 @@ describe('AuthService', () => {
     expect(result.accessToken).toBe('admin-access-token');
   });
 });
-
