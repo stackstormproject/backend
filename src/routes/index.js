@@ -4,6 +4,7 @@ const categoryRouter = require('./category.routes');
 const productRouter = require('./product.routes');
 const uploadRouter = require('./upload.routes');
 const cartRouter = require('./cart.routes');
+const inventoryRouter = require('./inventory.routes');
 
 const router = Router();
 
@@ -16,6 +17,7 @@ router.use('/categories', categoryRouter);
 router.use('/products', productRouter);
 router.use('/upload', uploadRouter);
 router.use('/cart', cartRouter);
+router.use('/inventory', inventoryRouter);
 
 // Support /api/v1 prefix per SRS & architectural guide
 const v1Router = Router();
@@ -24,6 +26,7 @@ v1Router.use('/categories', categoryRouter);
 v1Router.use('/products', productRouter);
 v1Router.use('/upload', uploadRouter);
 v1Router.use('/cart', cartRouter);
+v1Router.use('/inventory', inventoryRouter);
 router.use('/v1', v1Router);
 
 module.exports = router;

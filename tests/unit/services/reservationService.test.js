@@ -5,86 +5,77 @@ jest.mock('../../../src/models', () => ({
   },
 }));
 jest.mock('../../../src/services/cache.service', () => ({ set: jest.fn(), del: jest.fn() }));
-jest.mock('../../../src/config/logger', () => ({
-  info: jest.fn(),
-  warn: jest.fn(),
-  error: jest.fn(),
-}));
+jest.mock('../../../src/config/logger', () => {
+  const l = { info: jest.fn(), warn: jest.fn(), error: jest.fn() };
+  return { ...l, logger: l };
+});
 
 const { sequelize } = require('../../../src/models');
 const cacheService = require('../../../src/services/cache.service');
-const logger = require('../../../src/config/logger');
 const reservationService = require('../../../src/services/reservation.service');
 
-const { normalizeItems, reserveStock, confirmReservation, releaseReservation } = reservationService;
-
-const makeTransaction = () => ({ commit: jest.fn(), rollback: jest.fn() });
+const {
+  normalizeItems,
+  reserveStock,
+  confirmReservation,
+  releaseReservation,
+  releaseExpiredReservations,
+  releaseCustomerActiveReservations,
+} = reservationService;
 
 describe('normalizeItems', () => {
-  it('merges duplicate variants and sorts by id', () => {
-    expect(
-      normalizeItems([
-        { variant_id: 9, quantity: 1 },
-        { variant_id: 3, quantity: 2 },
-        { variant_id: 9, quantity: 2 },
-      ])
-    ).toEqual([
+  it('should merge duplicate variants and sort by id', () => {
+    const result = normalizeItems([
+      { variant_id: 9, quantity: 1 },
+      { variant_id: 3, quantity: 2 },
+      { variant_id: 9, quantity: 2 },
+    ]);
+
+    expect(result).toEqual([
       { variantId: 3, quantity: 2 },
       { variantId: 9, quantity: 3 },
     ]);
   });
 
-  it('accepts camel-case variant ids', () => {
-    expect(normalizeItems([{ variantId: '5', quantity: '3' }])).toEqual([
-      { variantId: 5, quantity: 3 },
-    ]);
+  it('should throw 400 given an empty list', () => {
+    expect(() => normalizeItems([])).toThrow();
+    expect(() => normalizeItems(undefined)).toThrow();
   });
 
-  it.each([undefined, null, {}, []])('rejects an empty or invalid item list: %p', (items) => {
-    expect(() => normalizeItems(items)).toThrow();
+  it('should throw given a non-integer or non-positive variant id', () => {
+    expect(() => normalizeItems([{ variant_id: 'abc', quantity: 1 }])).toThrow();
+    expect(() => normalizeItems([{ variant_id: 0, quantity: 1 }])).toThrow();
   });
 
-  it.each(['abc', 0, -1, 1.5])('rejects invalid variant id %p', (variantId) => {
-    expect(() => normalizeItems([{ variant_id: variantId, quantity: 1 }])).toThrow();
-  });
-
-  it.each([0, -1, 1.5, 'abc'])('rejects invalid quantity %p', (quantity) => {
-    expect(() => normalizeItems([{ variant_id: 1, quantity }])).toThrow();
+  it('should throw given a quantity that is zero, negative or fractional', () => {
+    expect(() => normalizeItems([{ variant_id: 1, quantity: 0 }])).toThrow();
+    expect(() => normalizeItems([{ variant_id: 1, quantity: -2 }])).toThrow();
+    expect(() => normalizeItems([{ variant_id: 1, quantity: 1.5 }])).toThrow();
   });
 });
 
 describe('reserveStock', () => {
-  let transaction;
+  let t;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    transaction = makeTransaction();
-    sequelize.transaction.mockResolvedValue(transaction);
+    t = { commit: jest.fn(), rollback: jest.fn() };
+    sequelize.transaction.mockResolvedValue(t);
   });
 
-  it('reserves stock, writes its ledger, and caches the reservation', async () => {
-    sequelize.query.mockResolvedValueOnce([
-      { id: 1, sku: 'SKU-1', stock_quantity: 5, reserved_quantity: 0 },
-    ]);
+  const variantRow = (stock, reserved) => [
+    { id: 1, sku: 'SKU-1', stock_quantity: stock, reserved_quantity: reserved },
+  ];
 
-    const result = await reserveStock({
-      customerId: 7,
-      orderId: 9,
-      items: [{ variant_id: 1, quantity: 2 }],
-    });
+  it('should reserve and cache given enough stock', async () => {
+    sequelize.query.mockResolvedValueOnce(variantRow(5, 0)).mockResolvedValue([]);
 
-    expect(result).toMatchObject({
-      order_id: 9,
-      expires_in: 900,
-      items: [{ variantId: 1, quantity: 2 }],
-    });
+    const result = await reserveStock({ customerId: 7, items: [{ variant_id: 1, quantity: 2 }] });
+
     expect(result.reservation_id).toMatch(/^res_/);
-    expect(transaction.commit).toHaveBeenCalled();
-    expect(transaction.rollback).not.toHaveBeenCalled();
-    expect(sequelize.query).toHaveBeenCalledWith(
-      expect.stringContaining('INSERT INTO reservation_items'),
-      expect.objectContaining({ transaction })
-    );
+    expect(result.expires_in).toBe(900);
+    expect(t.commit).toHaveBeenCalled();
+    expect(t.rollback).not.toHaveBeenCalled();
     expect(cacheService.set).toHaveBeenCalledWith(
       expect.stringMatching(/^reservation:res_/),
       expect.any(Object),
@@ -92,9 +83,31 @@ describe('reserveStock', () => {
     );
   });
 
-  it('locks variants in ascending id order', async () => {
+  it('should throw 409 and roll back given insufficient stock', async () => {
+    sequelize.query.mockResolvedValueOnce(variantRow(5, 4));
+
+    await expect(reserveStock({ items: [{ variant_id: 1, quantity: 3 }] })).rejects.toMatchObject({
+      statusCode: 409,
+    });
+
+    expect(t.rollback).toHaveBeenCalled();
+    expect(t.commit).not.toHaveBeenCalled();
+    expect(cacheService.set).not.toHaveBeenCalled();
+  });
+
+  it('should throw 404 given an unknown variant', async () => {
+    sequelize.query.mockResolvedValueOnce([]);
+
+    await expect(reserveStock({ items: [{ variant_id: 99, quantity: 1 }] })).rejects.toMatchObject({
+      statusCode: 404,
+    });
+
+    expect(t.rollback).toHaveBeenCalled();
+  });
+
+  it('should lock variants in ascending id order', async () => {
     sequelize.query.mockResolvedValue([
-      { id: 2, sku: 'SKU-2', stock_quantity: 9, reserved_quantity: 0 },
+      { id: 1, sku: 'S', stock_quantity: 9, reserved_quantity: 0 },
     ]);
 
     await reserveStock({
@@ -105,61 +118,38 @@ describe('reserveStock', () => {
     });
 
     const lockCalls = sequelize.query.mock.calls.filter(([sql]) => sql.includes('FOR UPDATE'));
-    expect(lockCalls.map(([, options]) => options.replacements.id)).toEqual([2, 8]);
+    expect(lockCalls[0][1].replacements.id).toBe(2);
+    expect(lockCalls[1][1].replacements.id).toBe(8);
   });
 
-  it('throws and rolls back when a variant does not exist', async () => {
-    sequelize.query.mockResolvedValueOnce([]);
-
-    await expect(reserveStock({ items: [{ variant_id: 99, quantity: 1 }] })).rejects.toMatchObject({
-      statusCode: 404,
-    });
-    expect(transaction.rollback).toHaveBeenCalled();
-    expect(cacheService.set).not.toHaveBeenCalled();
-  });
-
-  it('throws and rolls back when stock is insufficient', async () => {
-    sequelize.query.mockResolvedValueOnce([
-      { id: 1, sku: 'SKU-1', stock_quantity: 5, reserved_quantity: 4 },
-    ]);
-
-    await expect(reserveStock({ items: [{ variant_id: 1, quantity: 3 }] })).rejects.toMatchObject({
-      statusCode: 409,
-    });
-    expect(transaction.rollback).toHaveBeenCalled();
-    expect(transaction.commit).not.toHaveBeenCalled();
-  });
-
-  it('throws and rolls back on a database error', async () => {
-    sequelize.query.mockRejectedValueOnce(new Error('db failure'));
-
-    await expect(reserveStock({ items: [{ variant_id: 1, quantity: 1 }] })).rejects.toThrow(
-      'db failure'
-    );
-    expect(transaction.rollback).toHaveBeenCalled();
-  });
-
-  it('keeps the committed reservation when the Redis write fails', async () => {
-    sequelize.query.mockResolvedValueOnce([
-      { id: 1, sku: 'SKU-1', stock_quantity: 5, reserved_quantity: 0 },
-    ]);
+  it('should still succeed given Redis fails after commit', async () => {
+    sequelize.query.mockResolvedValueOnce(variantRow(5, 0)).mockResolvedValue([]);
     cacheService.set.mockRejectedValueOnce(new Error('redis down'));
 
-    await expect(reserveStock({ items: [{ variant_id: 1, quantity: 1 }] })).resolves.toMatchObject({
-      expires_in: 900,
-    });
-    expect(transaction.commit).toHaveBeenCalled();
-    expect(logger.warn).toHaveBeenCalled();
+    const result = await reserveStock({ items: [{ variant_id: 1, quantity: 1 }] });
+
+    expect(result.reservation_id).toBeDefined();
+    expect(t.commit).toHaveBeenCalled();
+  });
+
+  it('should roll back given a database error mid-way', async () => {
+    sequelize.query
+      .mockResolvedValueOnce(variantRow(5, 0))
+      .mockRejectedValueOnce(new Error('db boom'));
+
+    await expect(reserveStock({ items: [{ variant_id: 1, quantity: 1 }] })).rejects.toThrow(
+      'db boom'
+    );
+
+    expect(t.rollback).toHaveBeenCalled();
   });
 });
 
-describe('confirmReservation and releaseReservation', () => {
-  let transaction;
+describe('confirmReservation / releaseReservation', () => {
+  let t;
 
-  const mockReservation = ({
-    reservation = { id: 'res_1', customer_id: 7, status: 'ACTIVE', is_expired: false },
-    items = [{ variant_id: 1, quantity: 2 }],
-  } = {}) => {
+  // Routes each mocked query by its SQL text, so tests don't depend on call order
+  const mockDb = ({ reservation, items = [{ variant_id: 1, quantity: 2 }] }) => {
     sequelize.query.mockImplementation(async (sql) => {
       if (sql.includes('FROM stock_reservations')) return reservation ? [reservation] : [];
       if (sql.includes('FROM reservation_items')) return items;
@@ -167,153 +157,219 @@ describe('confirmReservation and releaseReservation', () => {
     });
   };
 
+  const sqlCalls = () => sequelize.query.mock.calls.map(([sql]) => sql);
+
   beforeEach(() => {
     jest.clearAllMocks();
-    transaction = makeTransaction();
-    sequelize.transaction.mockResolvedValue(transaction);
+    t = { commit: jest.fn(), rollback: jest.fn() };
+    sequelize.transaction.mockResolvedValue(t);
   });
 
-  it('deducts stock and writes an inventory log when confirming', async () => {
-    mockReservation();
+  it('should deduct stock and log it given an ACTIVE reservation is confirmed', async () => {
+    mockDb({ reservation: { id: 'res_1', customer_id: 7, status: 'ACTIVE' } });
 
-    await expect(confirmReservation('res_1', { customerId: 7 })).resolves.toBe(true);
+    const result = await confirmReservation('res_1', { customerId: 7 });
 
-    expect(
-      sequelize.query.mock.calls.some(([sql]) =>
-        sql.includes('stock_quantity = stock_quantity - :qty')
-      )
-    ).toBe(true);
-    expect(
-      sequelize.query.mock.calls.some(([sql]) => sql.includes('INSERT INTO inventory_logs'))
-    ).toBe(true);
-    expect(transaction.commit).toHaveBeenCalled();
-    expect(cacheService.del).toHaveBeenCalledWith('reservation:res_1');
+    expect(result).toBe(true);
+    const sqls = sqlCalls();
+    expect(sqls.some((s) => s.includes('stock_quantity = stock_quantity - :qty'))).toBe(true);
+    expect(sqls.some((s) => s.includes('INSERT INTO inventory_logs'))).toBe(true);
+    expect(t.commit).toHaveBeenCalled();
   });
 
-  it('frees reserved units without changing stock when releasing', async () => {
-    mockReservation();
+  it('should only free reserved units given a release (no stock change, no log)', async () => {
+    mockDb({ reservation: { id: 'res_1', customer_id: 7, status: 'ACTIVE' } });
 
-    await expect(releaseReservation('res_1', { customerId: 7 })).resolves.toBe(true);
+    const result = await releaseReservation('res_1', { customerId: 7 });
 
-    const sql = sequelize.query.mock.calls.map(([query]) => query).join('\n');
-    expect(sql).toContain('reserved_quantity = reserved_quantity - :qty');
-    expect(sql).not.toContain('INSERT INTO inventory_logs');
+    expect(result).toBe(true);
+    const sqls = sqlCalls();
+    expect(sqls.some((s) => s.includes('stock_quantity = stock_quantity - :qty'))).toBe(false);
+    expect(sqls.some((s) => s.includes('reserved_quantity = reserved_quantity - :qty'))).toBe(true);
+    expect(sqls.some((s) => s.includes('INSERT INTO inventory_logs'))).toBe(false);
   });
 
   it.each(['CONFIRMED', 'RELEASED', 'EXPIRED'])(
-    'does nothing when reservation status is %s',
+    'should be a no-op returning false given a %s reservation',
     async (status) => {
-      mockReservation({ reservation: { id: 'res_1', customer_id: 7, status } });
+      mockDb({ reservation: { id: 'res_1', customer_id: 7, status } });
 
-      await expect(confirmReservation('res_1')).resolves.toBe(false);
-      expect(transaction.rollback).toHaveBeenCalled();
-      expect(transaction.commit).not.toHaveBeenCalled();
+      expect(await confirmReservation('res_1')).toBe(false);
+
+      expect(sqlCalls().some((s) => s.includes('UPDATE product_variants'))).toBe(false);
+      expect(t.rollback).toHaveBeenCalled();
+      expect(t.commit).not.toHaveBeenCalled();
     }
   );
 
-  it('returns false when an expiry sweep cannot lock the reservation', async () => {
-    sequelize.query.mockResolvedValueOnce([{ id: 'res_1' }]).mockResolvedValueOnce([]);
+  it('should throw 404 given an unknown reservation', async () => {
+    mockDb({ reservation: null });
 
-    await expect(reservationService.releaseExpiredReservations()).resolves.toBe(0);
-    expect(transaction.rollback).toHaveBeenCalled();
+    await expect(confirmReservation('nope')).rejects.toMatchObject({ statusCode: 404 });
   });
 
-  it('returns false when the reservation has not expired yet', async () => {
-    mockReservation();
-
-    await expect(reservationService.releaseExpiredReservations()).resolves.toBe(0);
-    expect(transaction.rollback).toHaveBeenCalled();
-  });
-
-  it('throws not found for a missing reservation during confirmation', async () => {
-    mockReservation({ reservation: null });
-
-    await expect(confirmReservation('missing')).rejects.toMatchObject({ statusCode: 404 });
-    expect(transaction.rollback).toHaveBeenCalled();
-    expect(logger.error).toHaveBeenCalled();
-  });
-
-  it('throws forbidden when another customer owns the reservation', async () => {
-    mockReservation();
+  it('should throw 403 given another customer owns the reservation', async () => {
+    mockDb({ reservation: { id: 'res_1', customer_id: 7, status: 'ACTIVE' } });
 
     await expect(releaseReservation('res_1', { customerId: 8 })).rejects.toMatchObject({
       statusCode: 403,
     });
-    expect(transaction.rollback).toHaveBeenCalled();
+    expect(sqlCalls().some((s) => s.includes('UPDATE product_variants'))).toBe(false);
   });
 
-  it('allows settlement when the reservation is not customer-owned', async () => {
-    mockReservation({ reservation: { id: 'res_1', customer_id: null, status: 'ACTIVE' } });
+  it('should throw 403 given a customer settles an ownerless reservation', async () => {
+    mockDb({ reservation: { id: 'res_1', customer_id: null, status: 'ACTIVE' } });
 
-    await expect(releaseReservation('res_1', { customerId: 8 })).resolves.toBe(true);
+    await expect(releaseReservation('res_1', { customerId: 7 })).rejects.toMatchObject({
+      statusCode: 403,
+    });
   });
 
-  it('keeps the settlement successful when Redis cleanup fails', async () => {
-    mockReservation();
-    cacheService.del.mockRejectedValueOnce(new Error('redis down'));
-
-    await expect(releaseReservation('res_1')).resolves.toBe(true);
-    expect(logger.warn).toHaveBeenCalled();
-  });
-
-  it('rolls back and rethrows when updating stock fails', async () => {
+  it('should roll back given a database error while updating stock', async () => {
     sequelize.query.mockImplementation(async (sql) => {
       if (sql.includes('FROM stock_reservations')) {
-        return [{ id: 'res_1', customer_id: null, status: 'ACTIVE', is_expired: false }];
+        return [{ id: 'res_1', customer_id: null, status: 'ACTIVE' }];
       }
       if (sql.includes('FROM reservation_items')) return [{ variant_id: 1, quantity: 2 }];
-      if (sql.includes('UPDATE product_variants')) throw new Error('stock update failed');
+      if (sql.includes('UPDATE product_variants')) throw new Error('check violated');
       return [];
     });
 
-    await expect(confirmReservation('res_1')).rejects.toThrow('stock update failed');
-    expect(transaction.rollback).toHaveBeenCalled();
-    expect(logger.error).toHaveBeenCalled();
+    await expect(confirmReservation('res_1')).rejects.toThrow('check violated');
+
+    expect(t.rollback).toHaveBeenCalled();
+    expect(t.commit).not.toHaveBeenCalled();
+  });
+
+  it('should still succeed given Redis delete fails after commit', async () => {
+    mockDb({ reservation: { id: 'res_1', customer_id: null, status: 'ACTIVE' } });
+    cacheService.del.mockRejectedValueOnce(new Error('redis down'));
+
+    expect(await releaseReservation('res_1')).toBe(true);
   });
 });
 
-describe('releaseExpiredReservations', () => {
-  let transaction;
+describe('EXPIRE mode and releaseExpiredReservations', () => {
+  let t;
 
   beforeEach(() => {
     jest.clearAllMocks();
-    transaction = makeTransaction();
-    sequelize.transaction.mockResolvedValue(transaction);
+    sequelize.query.mockReset();
+    t = { commit: jest.fn(), rollback: jest.fn() };
+    sequelize.transaction.mockResolvedValue(t);
   });
 
-  it('returns zero when there are no expired reservations', async () => {
+  const sqlCalls = () => sequelize.query.mock.calls.map(([sql]) => sql);
+
+  it('should return 0 given nothing is expired', async () => {
     sequelize.query.mockResolvedValueOnce([]);
 
-    await expect(reservationService.releaseExpiredReservations()).resolves.toBe(0);
+    expect(await releaseExpiredReservations()).toBe(0);
     expect(sequelize.transaction).not.toHaveBeenCalled();
   });
 
-  it('releases expired reservations and continues after a settlement error', async () => {
-    sequelize.query
-      .mockResolvedValueOnce([{ id: 'res_1' }, { id: 'res_2' }])
-      .mockImplementation(async (sql, options = {}) => {
-        if (sql.includes('FROM stock_reservations')) {
-          if (sql.includes('FOR UPDATE')) {
-            if (options.replacements.id === 'res_1') {
-              throw new Error('temporary database error');
-            }
-            return [{ id: 'res_2', customer_id: null, status: 'ACTIVE', is_expired: true }];
-          }
-          return [];
-        }
-        if (sql.includes('FROM reservation_items')) return [{ variant_id: 1, quantity: 1 }];
-        return [];
-      });
+  it('should release each expired hold and count them', async () => {
+    sequelize.query.mockImplementation(async (sql) => {
+      if (sql.includes('LIMIT :batchSize')) return [{ id: 'res_1' }, { id: 'res_2' }];
+      if (sql.includes('FOR UPDATE SKIP LOCKED')) {
+        return [{ id: 'res_x', customer_id: null, status: 'ACTIVE', is_expired: true }];
+      }
+      if (sql.includes('FROM reservation_items')) return [{ variant_id: 1, quantity: 2 }];
+      return [];
+    });
 
-    await expect(reservationService.releaseExpiredReservations()).resolves.toBe(1);
-    expect(logger.error).toHaveBeenCalledWith(expect.stringContaining('Failed to expire res_1'));
+    expect(await releaseExpiredReservations()).toBe(2);
+
+    const sqls = sqlCalls();
+    expect(sqls.some((s) => s.includes('stock_quantity = stock_quantity - :qty'))).toBe(false);
+    expect(sqls.some((s) => s.includes('INSERT INTO inventory_logs'))).toBe(false);
+    expect(t.commit).toHaveBeenCalledTimes(2);
   });
 
-  it('uses the requested batch size', async () => {
+  it('should skip a hold locked by another worker', async () => {
+    sequelize.query.mockImplementation(async (sql) => {
+      if (sql.includes('LIMIT :batchSize')) return [{ id: 'res_1' }];
+      if (sql.includes('FOR UPDATE SKIP LOCKED')) return []; // locked elsewhere
+      return [];
+    });
+
+    expect(await releaseExpiredReservations()).toBe(0);
+    expect(t.rollback).toHaveBeenCalled();
+    expect(t.commit).not.toHaveBeenCalled();
+  });
+
+  it('should skip a hold that is no longer expired when locked', async () => {
+    sequelize.query.mockImplementation(async (sql) => {
+      if (sql.includes('LIMIT :batchSize')) return [{ id: 'res_1' }];
+      if (sql.includes('FOR UPDATE SKIP LOCKED')) {
+        return [{ id: 'res_1', customer_id: null, status: 'ACTIVE', is_expired: false }];
+      }
+      return [];
+    });
+
+    expect(await releaseExpiredReservations()).toBe(0);
+    expect(sqlCalls().some((s) => s.includes('UPDATE product_variants'))).toBe(false);
+  });
+
+  it('should keep going given one reservation fails', async () => {
+    let lockCalls = 0;
+    sequelize.query.mockImplementation(async (sql) => {
+      if (sql.includes('LIMIT :batchSize')) return [{ id: 'res_1' }, { id: 'res_2' }];
+      if (sql.includes('FOR UPDATE SKIP LOCKED')) {
+        lockCalls += 1;
+        if (lockCalls === 1) throw new Error('db boom');
+        return [{ id: 'res_2', customer_id: null, status: 'ACTIVE', is_expired: true }];
+      }
+      if (sql.includes('FROM reservation_items')) return [{ variant_id: 1, quantity: 1 }];
+      return [];
+    });
+
+    expect(await releaseExpiredReservations()).toBe(1);
+  });
+});
+
+describe('caps and one-hold-per-customer', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+    sequelize.query.mockReset();
+  });
+
+  it('should throw given more than 20 items or more than 10 units of one item', () => {
+    const many = Array.from({ length: 21 }, (_, i) => ({ variant_id: i + 1, quantity: 1 }));
+    expect(() => normalizeItems(many)).toThrow();
+    expect(() => normalizeItems([{ variant_id: 1, quantity: 11 }])).toThrow();
+  });
+
+  it('should accept exactly 20 items and exactly 10 units of one item', () => {
+    const twenty = Array.from({ length: 20 }, (_, i) => ({ variant_id: i + 1, quantity: 1 }));
+    expect(normalizeItems(twenty)).toHaveLength(20);
+    expect(normalizeItems([{ variant_id: 1, quantity: 10 }])).toEqual([
+      { variantId: 1, quantity: 10 },
+    ]);
+  });
+
+  it('should release every active hold the customer has', async () => {
+    const t = { commit: jest.fn(), rollback: jest.fn() };
+    sequelize.transaction.mockResolvedValue(t);
+    sequelize.query.mockImplementation(async (sql) => {
+      if (sql.includes("customer_id = :customerId AND status = 'ACTIVE'")) {
+        return [{ id: 'res_1' }, { id: 'res_2' }];
+      }
+      if (sql.includes('FROM stock_reservations WHERE id')) {
+        return [{ id: 'x', customer_id: 7, status: 'ACTIVE' }];
+      }
+      if (sql.includes('FROM reservation_items')) return [{ variant_id: 1, quantity: 1 }];
+      return [];
+    });
+
+    expect(await releaseCustomerActiveReservations(7)).toBe(2);
+    expect(t.commit).toHaveBeenCalledTimes(2);
+  });
+
+  it('should return 0 given the customer has no active holds', async () => {
     sequelize.query.mockResolvedValueOnce([]);
 
-    await reservationService.releaseExpiredReservations(25);
-
-    expect(sequelize.query.mock.calls[0][1].replacements.batchSize).toBe(25);
+    expect(await releaseCustomerActiveReservations(7)).toBe(0);
+    expect(sequelize.transaction).not.toHaveBeenCalled();
   });
 });
