@@ -184,7 +184,13 @@ describe('Cache Invalidation Pipeline & Cache-Aside Integration Tests (STORM-022
           parentId: null,
           isActive: true,
           toJSON() {
-            return { id: 1, name: "Men's Premium", slug: 'mens-premium', parentId: null, isActive: true };
+            return {
+              id: 1,
+              name: "Men's Premium",
+              slug: 'mens-premium',
+              parentId: null,
+              isActive: true,
+            };
           },
         },
       ];

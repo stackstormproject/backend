@@ -4,10 +4,8 @@ const { createLimiter } = require('../../../src/middleware/rateLimiter');
 
 const makeApp = (limit) => {
   const app = express();
-  app.get(
-    '/x',
-    createLimiter({ windowMs: 60000, limit, message: 'slow' }),
-    (req, res) => res.json({})
+  app.get('/x', createLimiter({ windowMs: 60000, limit, message: 'slow' }), (req, res) =>
+    res.json({})
   );
   return app;
 };

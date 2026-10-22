@@ -21,6 +21,10 @@ class ApiError extends AppError {
     return new ApiError(403, message, details, code);
   }
 
+  static conflict(message = 'Conflict', details = undefined, code = 'CONFLICT') {
+    return new ApiError(409, message, details, code);
+  }
+
   static internal(message = 'Internal server error', details = undefined, code = 'INTERNAL_ERROR') {
     return new ApiError(500, message, details, code);
   }
