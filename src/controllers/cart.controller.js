@@ -1,5 +1,6 @@
 const cartService = require('../services/cart.service');
 const { successResponse, errorResponse } = require('../utils/responseFormatter');
+const { SESSION_TOKEN_RE } = require('../middleware/cartIdentity');
 
 const MAX_QTY = 99;
 const isId = (v) => Number.isInteger(v) && v > 0;
@@ -57,4 +58,17 @@ const removeItem = async (req, res, next) => {
   }
 };
 
-module.exports = { getCart, addItem, updateItem, removeItem };
+const mergeCart = async (req, res, next) => {
+  try {
+    const token = req.body.session_token || req.get('X-Session-Token');
+    if (!token || !SESSION_TOKEN_RE.test(String(token))) {
+      return errorResponse(res, 'A valid session_token is required to merge a guest cart', [], 400);
+    }
+    const result = await cartService.mergeGuestCart(Number(req.user.id), token);
+    return successResponse(res, result, 'Guest cart merged into your cart');
+  } catch (err) {
+    return next(err);
+  }
+};
+
+module.exports = { getCart, addItem, updateItem, removeItem, mergeCart };
