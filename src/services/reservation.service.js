@@ -6,7 +6,7 @@ const logger = require('../config/logger');
 const ApiError = require('../utils/ApiError');
 
 const RESERVATION_TTL_SECONDS = 900; // 15 minutes
-
+const SWEEP_BATCH_SIZE = 100;
 const isPositiveInt = (v) => Number.isInteger(v) && v > 0;
 
 /**
@@ -74,7 +74,7 @@ const reserveStock = async ({
       // eslint-disable-next-line no-await-in-loop
       await sequelize.query(
         `UPDATE product_variants
-            SET reserved_quantity = reserved_quantity + :qty, updated_at = NOW()
+SET reserved_quantity = reserved_quantity + :qty, updated_at = NOW()
           WHERE id = :id`,
         { replacements: { qty: item.quantity, id: item.variantId }, transaction: t }
       );
@@ -137,24 +137,41 @@ const reserveStock = async ({
 };
 
 /**
- * Shared state transition for a reservation: CONFIRM (payment succeeded) or RELEASE (cancelled).
- * The status is checked UNDER the row lock, so concurrent confirm/release calls can never
- * double-apply. Returns true if applied, false if it was already settled.
+ * Shared state transition for a reservation:
+ * CONFIRM (payment succeeded), RELEASE (cancelled) or EXPIRE (hold timed out).
+ * The status is checked UNDER the row lock, so concurrent calls can never double-apply.
+ * Returns true if applied, false if it was already settled (or skipped).
  */
 const settle = async (reservationId, mode, { customerId = null } = {}) => {
-  const finalStatus = mode === 'CONFIRM' ? 'CONFIRMED' : 'RELEASED';
+  const finalStatus = { CONFIRM: 'CONFIRMED', RELEASE: 'RELEASED', EXPIRE: 'EXPIRED' }[mode];
+  // SKIP LOCKED: if another instance is already processing this hold, skip it instead of waiting
+  const lockClause = mode === 'EXPIRE' ? 'FOR UPDATE SKIP LOCKED' : 'FOR UPDATE';
 
   const t = await sequelize.transaction();
   try {
     const [reservation] = await sequelize.query(
-      `SELECT id, customer_id, status FROM stock_reservations WHERE id = :id FOR UPDATE`,
+      `SELECT id, customer_id, status, (expires_at < NOW()) AS is_expired
+         FROM stock_reservations WHERE id = :id ${lockClause}`,
       { replacements: { id: reservationId }, type: QueryTypes.SELECT, transaction: t }
     );
-    if (!reservation) throw ApiError.notFound(`Reservation ${reservationId} not found`);
+    if (!reservation) {
+      if (mode === 'EXPIRE') {
+        await t.rollback();
+        return false; // locked by another worker
+      }
+      throw ApiError.notFound(`Reservation ${reservationId} not found`);
+    }
 
     // Ownership check: a customer may only settle their own hold
     if (customerId && reservation.customer_id && reservation.customer_id !== customerId) {
       throw ApiError.forbidden('You do not own this reservation');
+    }
+
+    // Re-verify expiry under the lock: the hold may have been confirmed or extended
+    // between the sweeper's SELECT and its lock
+    if (mode === 'EXPIRE' && !reservation.is_expired) {
+      await t.rollback();
+      return false;
     }
 
     if (reservation.status !== 'ACTIVE') {
@@ -173,6 +190,7 @@ const settle = async (reservationId, mode, { customerId = null } = {}) => {
     for (const item of items) {
       // The CHECK constraint aborts the transaction if this would go negative.
       // That would be a bug, so we let it fail loudly instead of masking it.
+      // RELEASE and EXPIRE only free reserved units; CONFIRM also deducts stock.
       const sql =
         mode === 'CONFIRM'
           ? `UPDATE product_variants
@@ -238,10 +256,39 @@ const confirmReservation = (reservationId, opts) => settle(reservationId, 'CONFI
 /** Checkout cancelled: return reserved units to the public catalogue. */
 const releaseReservation = (reservationId, opts) => settle(reservationId, 'RELEASE', opts);
 
+/**
+ * Releases ACTIVE reservations past expires_at. Reads the DATABASE, never Redis, so it still
+ * works after Redis keys expire or the server restarts. Each hold is released in its own short
+ * transaction, so one failure cannot block the rest.
+ * @returns {Promise<number>} number of reservations released
+ */
+const releaseExpiredReservations = async (batchSize = SWEEP_BATCH_SIZE) => {
+  const expired = await sequelize.query(
+    `SELECT id FROM stock_reservations
+      WHERE status = 'ACTIVE' AND expires_at < NOW()
+      ORDER BY expires_at
+      LIMIT :batchSize`,
+    { replacements: { batchSize }, type: QueryTypes.SELECT }
+  );
+
+  let released = 0;
+  // eslint-disable-next-line no-restricted-syntax
+  for (const { id } of expired) {
+    try {
+      // eslint-disable-next-line no-await-in-loop
+      if (await settle(id, 'EXPIRE')) released += 1;
+    } catch (err) {
+      logger.error(`[RESERVATION EXPIRY] Failed to expire ${id}: ${err.message}`);
+    }
+  }
+  return released;
+};
+
 module.exports = {
   normalizeItems,
   reserveStock,
   confirmReservation,
   releaseReservation,
+  releaseExpiredReservations,
   RESERVATION_TTL_SECONDS,
 };
