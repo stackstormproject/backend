@@ -1,0 +1,117 @@
+const request = require('supertest');
+const jwt = require('jsonwebtoken');
+const app = require('../../../src/app');
+const { Cart, CartItem, sequelize } = require('../../../src/models');
+const cartService = require('../../../src/services/cart.service');
+const { createTestVariant, createTestCustomer } = require('../../helpers/factories');
+
+const TOKEN = 'guest_mergetoken1234567';
+
+describe('Cart merge', () => {
+  afterEach(async () => {
+    jest.restoreAllMocks();
+    await CartItem.destroy({ where: {} });
+    await Cart.destroy({ where: {} });
+  });
+
+  afterAll(async () => {
+    await sequelize.query(`DELETE FROM customers WHERE email LIKE 't-%@test.lk'`);
+    await sequelize.close();
+  });
+
+  it('should sum quantities given an overlapping SKU (AC2)', async () => {
+    const customer = await createTestCustomer();
+    const a = await createTestVariant({ stockQuantity: 10 });
+    await cartService.addItem({ customerId: customer.id }, a.id, 1);
+    await cartService.addItem({ sessionToken: TOKEN }, a.id, 2);
+
+    const result = await cartService.mergeGuestCart(customer.id, TOKEN);
+
+    expect(result.mergedCount).toBe(1);
+    const userCart = await Cart.findOne({ where: { customerId: customer.id } });
+    const rows = await CartItem.findAll({ where: { cartId: userCart.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].quantity).toBe(3);
+    expect(await Cart.findOne({ where: { sessionToken: TOKEN } })).toBeNull();
+  });
+
+  it('should move a unique item to the customer cart (AC1)', async () => {
+    const customer = await createTestCustomer();
+    const b = await createTestVariant({ stockQuantity: 10 });
+    await cartService.addItem({ sessionToken: TOKEN }, b.id, 1);
+
+    await cartService.mergeGuestCart(customer.id, TOKEN);
+
+    const userCart = await Cart.findOne({ where: { customerId: customer.id } });
+    const rows = await CartItem.findAll({ where: { cartId: userCart.id } });
+    expect(rows).toHaveLength(1);
+    expect(rows[0].productVariantId).toBe(b.id);
+  });
+
+  it('should clamp to available stock and report it (AC3)', async () => {
+    const customer = await createTestCustomer();
+    const a = await createTestVariant({ stockQuantity: 2 });
+    await cartService.addItem({ customerId: customer.id }, a.id, 1);
+    await cartService.addItem({ sessionToken: TOKEN }, a.id, 2);
+
+    const result = await cartService.mergeGuestCart(customer.id, TOKEN);
+
+    expect(result.clamped).toHaveLength(1);
+    expect(result.clamped[0]).toMatchObject({ requested: 3, applied: 2 });
+    const rows = await CartItem.findAll();
+    expect(rows).toHaveLength(1);
+    expect(rows[0].quantity).toBe(2);
+  });
+
+  it('should return mergedCount 0 given an unknown token or a replay (AC4, AC6)', async () => {
+    const customer = await createTestCustomer();
+    const a = await createTestVariant({ stockQuantity: 10 });
+    await cartService.addItem({ sessionToken: TOKEN }, a.id, 1);
+
+    await cartService.mergeGuestCart(customer.id, TOKEN);
+    const replay = await cartService.mergeGuestCart(customer.id, TOKEN);
+
+    expect(replay.mergedCount).toBe(0);
+    expect(
+      (await cartService.mergeGuestCart(customer.id, 'guest_doesnotexist12345')).mergedCount
+    ).toBe(0);
+  });
+
+  it('should roll back everything given a failure mid-merge (AC5)', async () => {
+    const customer = await createTestCustomer();
+    const a = await createTestVariant({ stockQuantity: 10 });
+    await cartService.addItem({ sessionToken: TOKEN }, a.id, 1);
+    jest.spyOn(Cart.prototype, 'destroy').mockRejectedValueOnce(new Error('boom'));
+
+    await expect(cartService.mergeGuestCart(customer.id, TOKEN)).rejects.toThrow('boom');
+
+    const guestCart = await Cart.findOne({ where: { sessionToken: TOKEN } });
+    expect(guestCart).not.toBeNull();
+    expect(await CartItem.count({ where: { cartId: guestCart.id } })).toBe(1);
+  });
+
+  it('should return 401 given a guest token but no login (AC6)', async () => {
+    const res = await request(app)
+      .post('/api/v1/cart/merge')
+      .set('X-Session-Token', TOKEN)
+      .send({});
+    expect(res.status).toBe(401);
+  });
+
+  it('should return 401 given no identity at all (AC6)', async () => {
+    const res = await request(app).post('/api/v1/cart/merge').send({});
+    expect(res.status).toBe(401);
+  });
+
+  it('should return 400 given a logged-in customer with no valid session token (AC4)', async () => {
+    const customer = await createTestCustomer();
+    const bearer = jwt.sign({ id: customer.id, role: 'customer' }, process.env.JWT_SECRET);
+
+    const res = await request(app)
+      .post('/api/v1/cart/merge')
+      .set('Authorization', `Bearer ${bearer}`)
+      .send({});
+
+    expect(res.status).toBe(400);
+  });
+});
