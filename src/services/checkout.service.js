@@ -4,7 +4,7 @@
 // 10,000 LKR free shipping threshold, and builds the immutable Order contract.
 // ==============================================================================
 
-const { Order, OrderItem, ProductVariant, Product, sequelize } = require('../models');
+// const { Order, OrderItem, ProductVariant, Product, sequelize } = require('../models');
 const reservationService = require('./reservation.service');
 const ApiError = require('../utils/ApiError');
 
