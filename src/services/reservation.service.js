@@ -136,4 +136,112 @@ const reserveStock = async ({
   };
 };
 
-module.exports = { normalizeItems, reserveStock, RESERVATION_TTL_SECONDS };
+/**
+ * Shared state transition for a reservation: CONFIRM (payment succeeded) or RELEASE (cancelled).
+ * The status is checked UNDER the row lock, so concurrent confirm/release calls can never
+ * double-apply. Returns true if applied, false if it was already settled.
+ */
+const settle = async (reservationId, mode, { customerId = null } = {}) => {
+  const finalStatus = mode === 'CONFIRM' ? 'CONFIRMED' : 'RELEASED';
+
+  const t = await sequelize.transaction();
+  try {
+    const [reservation] = await sequelize.query(
+      `SELECT id, customer_id, status FROM stock_reservations WHERE id = :id FOR UPDATE`,
+      { replacements: { id: reservationId }, type: QueryTypes.SELECT, transaction: t }
+    );
+    if (!reservation) throw ApiError.notFound(`Reservation ${reservationId} not found`);
+
+    // Ownership check: a customer may only settle their own hold
+    if (customerId && reservation.customer_id && reservation.customer_id !== customerId) {
+      throw ApiError.forbidden('You do not own this reservation');
+    }
+
+    if (reservation.status !== 'ACTIVE') {
+      await t.rollback();
+      return false; // already confirmed, released or expired: idempotent no-op
+    }
+
+    // Same ascending order as reserveStock, so the lock order is consistent
+    const items = await sequelize.query(
+      `SELECT variant_id, quantity FROM reservation_items
+        WHERE reservation_id = :id ORDER BY variant_id`,
+      { replacements: { id: reservationId }, type: QueryTypes.SELECT, transaction: t }
+    );
+
+    // eslint-disable-next-line no-restricted-syntax
+    for (const item of items) {
+      // The CHECK constraint aborts the transaction if this would go negative.
+      // That would be a bug, so we let it fail loudly instead of masking it.
+      const sql =
+        mode === 'CONFIRM'
+          ? `UPDATE product_variants
+                SET stock_quantity = stock_quantity - :qty,
+                    reserved_quantity = reserved_quantity - :qty,
+                    updated_at = NOW()
+              WHERE id = :vid`
+          : `UPDATE product_variants
+                SET reserved_quantity = reserved_quantity - :qty,
+                    updated_at = NOW()
+              WHERE id = :vid`;
+      // eslint-disable-next-line no-await-in-loop
+      await sequelize.query(sql, {
+        replacements: { qty: item.quantity, vid: item.variant_id },
+        transaction: t,
+      });
+
+      if (mode === 'CONFIRM') {
+        // Audit row: physical stock left the warehouse
+        // eslint-disable-next-line no-await-in-loop
+        await sequelize.query(
+          `INSERT INTO inventory_logs
+             (product_variant_id, admin_id, change_quantity, reason, created_at, updated_at)
+           VALUES (:vid, NULL, :delta, :reason, NOW(), NOW())`,
+          {
+            replacements: {
+              vid: item.variant_id,
+              delta: -item.quantity,
+              reason: `Sale confirmed (${reservationId})`,
+            },
+            transaction: t,
+          }
+        );
+      }
+    }
+
+    await sequelize.query(
+      `UPDATE stock_reservations SET status = :status, updated_at = NOW() WHERE id = :id`,
+      { replacements: { status: finalStatus, id: reservationId }, transaction: t }
+    );
+
+    await t.commit();
+  } catch (err) {
+    await t.rollback();
+    logger.error(`[RESERVATION] ${mode} failed for ${reservationId}: ${err.message}`);
+    throw err;
+  }
+
+  // Best-effort cache cleanup after commit
+  try {
+    await cacheService.del(`reservation:${reservationId}`);
+  } catch (err) {
+    logger.warn(`[RESERVATION] Redis delete failed for ${reservationId}: ${err.message}`);
+  }
+
+  logger.info(`[RESERVATION] ${mode} applied to "${reservationId}"`);
+  return true;
+};
+
+/** Payment succeeded: turn reserved units into a permanent stock deduction. */
+const confirmReservation = (reservationId, opts) => settle(reservationId, 'CONFIRM', opts);
+
+/** Checkout cancelled: return reserved units to the public catalogue. */
+const releaseReservation = (reservationId, opts) => settle(reservationId, 'RELEASE', opts);
+
+module.exports = {
+  normalizeItems,
+  reserveStock,
+  confirmReservation,
+  releaseReservation,
+  RESERVATION_TTL_SECONDS,
+};
