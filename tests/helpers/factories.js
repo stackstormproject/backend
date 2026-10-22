@@ -5,14 +5,14 @@ let counter = 0;
 const unique = () => `${Date.now()}-${(counter += 1)}`;
 
 /**
- * Inserts a product and a variant using raw SQL (column names from your migrations),
+ * Inserts a product and a variant using raw SQL (column names from the current schema),
  * then returns the ProductVariant model instance.
  */
 const createTestVariant = async ({ stockQuantity = 10, reservedQuantity = 0 } = {}) => {
   const [product] = await sequelize.query(
-    `INSERT INTO products (name, base_price, created_at, updated_at)
-     VALUES (:name, 1000, NOW(), NOW()) RETURNING id`,
-    { replacements: { name: `Test Product ${unique()}` }, type: QueryTypes.SELECT }
+    `INSERT INTO products (name, price, created_at, updated_at)
+     VALUES (:name, :price, NOW(), NOW()) RETURNING id`,
+    { replacements: { name: `Test Product ${unique()}`, price: 1000 }, type: QueryTypes.SELECT }
   );
 
   const [variant] = await sequelize.query(
