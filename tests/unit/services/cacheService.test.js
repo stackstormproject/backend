@@ -41,7 +41,11 @@ describe('cacheService Unit Tests', () => {
       const result = await cacheService.set('cache:test', { ok: true }, 60);
 
       expect(result).toBe(true);
-      expect(redisClient.setex).toHaveBeenCalledWith('cache:test', 60, JSON.stringify({ ok: true }));
+      expect(redisClient.setex).toHaveBeenCalledWith(
+        'cache:test',
+        60,
+        JSON.stringify({ ok: true })
+      );
     });
 
     it('should use standard set when ttlSeconds is not provided or zero', async () => {
@@ -50,7 +54,10 @@ describe('cacheService Unit Tests', () => {
       const result = await cacheService.set('cache:test:nottl', { ok: true });
 
       expect(result).toBe(true);
-      expect(redisClient.set).toHaveBeenCalledWith('cache:test:nottl', JSON.stringify({ ok: true }));
+      expect(redisClient.set).toHaveBeenCalledWith(
+        'cache:test:nottl',
+        JSON.stringify({ ok: true })
+      );
     });
 
     it('should catch error and return false when Redis set fails', async () => {
@@ -121,7 +128,11 @@ describe('cacheService Unit Tests', () => {
 
       expect(result).toEqual(fresh);
       expect(fetcherFn).toHaveBeenCalledTimes(1);
-      expect(redisClient.setex).toHaveBeenCalledWith('cache:product:42', 3600, JSON.stringify(fresh));
+      expect(redisClient.setex).toHaveBeenCalledWith(
+        'cache:product:42',
+        3600,
+        JSON.stringify(fresh)
+      );
     });
 
     it('should not write to cache if fetcherFn returns null or undefined', async () => {

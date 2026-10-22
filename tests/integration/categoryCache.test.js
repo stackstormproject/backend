@@ -91,7 +91,9 @@ describe('GET /api/v1/categories - Cache-Aside & Hierarchy Integration', () => {
         id: 1,
         name: 'Men',
         slug: 'men',
-        children: [{ id: 2, name: 'Handloom Batik Shirts', slug: 'handloom-batik-shirts', children: [] }],
+        children: [
+          { id: 2, name: 'Handloom Batik Shirts', slug: 'handloom-batik-shirts', children: [] },
+        ],
       },
     ];
 
