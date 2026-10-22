@@ -14,7 +14,7 @@ const customerOnly = (req, res, next) => {
   return next();
 };
 
-// auth runs first so the limiter can key on req.user.id
+// auth runs first so the limiter can key on the authenticated customer
 router.post('/reserve', auth, customerOnly, createReserveLimiter(), controller.reserve);
 router.delete('/reservations/:id', auth, customerOnly, controller.release);
 
