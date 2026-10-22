@@ -7,6 +7,9 @@ const ApiError = require('../utils/ApiError');
 
 const RESERVATION_TTL_SECONDS = 900; // 15 minutes
 const SWEEP_BATCH_SIZE = 100;
+const MAX_ITEMS = 20;
+const MAX_QUANTITY_PER_ITEM = 10;
+
 const isPositiveInt = (v) => Number.isInteger(v) && v > 0;
 
 /**
@@ -16,6 +19,9 @@ const isPositiveInt = (v) => Number.isInteger(v) && v > 0;
 const normalizeItems = (items) => {
   if (!Array.isArray(items) || items.length === 0) {
     throw ApiError.badRequest('At least one item must be specified for stock reservation');
+  }
+  if (items.length > MAX_ITEMS) {
+    throw ApiError.badRequest(`At most ${MAX_ITEMS} items per reservation`);
   }
 
   const merged = new Map();
@@ -27,6 +33,9 @@ const normalizeItems = (items) => {
     }
     if (!isPositiveInt(quantity)) {
       throw ApiError.badRequest(`Invalid quantity for variant ${variantId}`);
+    }
+    if (quantity > MAX_QUANTITY_PER_ITEM) {
+      throw ApiError.badRequest(`At most ${MAX_QUANTITY_PER_ITEM} units per item`);
     }
     merged.set(variantId, (merged.get(variantId) || 0) + quantity);
   });
@@ -74,7 +83,7 @@ const reserveStock = async ({
       // eslint-disable-next-line no-await-in-loop
       await sequelize.query(
         `UPDATE product_variants
-SET reserved_quantity = reserved_quantity + :qty, updated_at = NOW()
+            SET reserved_quantity = reserved_quantity + :qty, updated_at = NOW()
           WHERE id = :id`,
         { replacements: { qty: item.quantity, id: item.variantId }, transaction: t }
       );
@@ -162,8 +171,8 @@ const settle = async (reservationId, mode, { customerId = null } = {}) => {
       throw ApiError.notFound(`Reservation ${reservationId} not found`);
     }
 
-    // Ownership check: a customer may only settle their own hold
-    if (customerId && reservation.customer_id && reservation.customer_id !== customerId) {
+    // Ownership check: when a customer is given, they must own the hold
+    if (customerId !== null && reservation.customer_id !== customerId) {
       throw ApiError.forbidden('You do not own this reservation');
     }
 
@@ -284,11 +293,27 @@ const releaseExpiredReservations = async (batchSize = SWEEP_BATCH_SIZE) => {
   return released;
 };
 
+/** One active hold per customer: release any earlier ones before reserving again. */
+const releaseCustomerActiveReservations = async (customerId) => {
+  const active = await sequelize.query(
+    `SELECT id FROM stock_reservations WHERE customer_id = :customerId AND status = 'ACTIVE'`,
+    { replacements: { customerId }, type: QueryTypes.SELECT }
+  );
+  let released = 0;
+  // eslint-disable-next-line no-restricted-syntax
+  for (const { id } of active) {
+    // eslint-disable-next-line no-await-in-loop
+    if (await settle(id, 'RELEASE', { customerId })) released += 1;
+  }
+  return released;
+};
+
 module.exports = {
   normalizeItems,
   reserveStock,
   confirmReservation,
   releaseReservation,
   releaseExpiredReservations,
+  releaseCustomerActiveReservations,
   RESERVATION_TTL_SECONDS,
 };
