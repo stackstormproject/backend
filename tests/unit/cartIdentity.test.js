@@ -1,4 +1,5 @@
-const { resolveCartIdentity } = require('../../src/middleware/cartIdentity');
+const jwt = require('jsonwebtoken');
+const { resolveCartIdentity, optionalAuth } = require('../../src/middleware/cartIdentity');
 
 const mockRes = () => {
   const res = {};
@@ -56,5 +57,47 @@ describe('resolveCartIdentity', () => {
     resolveCartIdentity(req, res, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(400);
+  });
+});
+
+describe('optionalAuth', () => {
+  const OLD = process.env.JWT_SECRET;
+
+  beforeAll(() => {
+    process.env.JWT_SECRET = 'test-secret';
+  });
+
+  afterAll(() => {
+    process.env.JWT_SECRET = OLD;
+  });
+
+  it('should continue as a guest given no Authorization header', () => {
+    const req = { headers: {} };
+    const next = jest.fn();
+
+    optionalAuth(req, mockRes(), next);
+
+    expect(req.user).toBeUndefined();
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('should set req.user given a valid Bearer token', () => {
+    const token = jwt.sign({ id: 7, role: 'customer' }, 'test-secret');
+    const req = { headers: { authorization: `Bearer ${token}` } };
+    const next = jest.fn();
+
+    optionalAuth(req, mockRes(), next);
+
+    expect(req.user).toEqual({ id: 7, role: 'customer' });
+    expect(next).toHaveBeenCalled();
+  });
+
+  it('should return 401 given an invalid Bearer token', () => {
+    const req = { headers: { authorization: 'Bearer not-a-token' } };
+    const res = mockRes();
+
+    optionalAuth(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(401);
   });
 });
