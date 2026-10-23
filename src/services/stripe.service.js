@@ -9,8 +9,7 @@
 const Stripe = require('stripe');
 const { Order, Payment } = require('../models');
 const reservationService = require('./reservation.service');
-const orderService = require('./order.service');
-const { logger } = require('../config/logger');
+const logger = require('../config/logger');
 const ApiError = require('../utils/ApiError');
 
 // Environment API Keys
@@ -131,7 +130,13 @@ const handleWebhookEvent = async (event) => {
     }
 
     // Step 1: Transition Order status to 'paid' and 'processing'
-    await orderService.finalizeOrder(orderId, paymentIntent);
+    await Order.update(
+      {
+        status: 'processing',
+        paymentIntentId: (paymentIntent && paymentIntent.id) || null,
+      },
+      { where: { id: orderId } }
+    );
 
     // Step 2: [PERMANENT INVENTORY CONFIRMATION]:
     // Convert 15-minute temporary reservation into a permanent warehouse stock deduction
