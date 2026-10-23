@@ -5,7 +5,6 @@
 // validates incoming Stripe webhook signatures using raw request buffers.
 // ==============================================================================
 
-// const crypto = require('crypto');
 const Stripe = require('stripe');
 const { Order, Payment } = require('../models');
 const reservationService = require('./reservation.service');
