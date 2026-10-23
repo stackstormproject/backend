@@ -13,8 +13,7 @@ const logger = require('../config/logger');
 const ApiError = require('../utils/ApiError');
 
 // Environment API Keys
-const STRIPE_SECRET_KEY =
-  process.env.STRIPE_SECRET_KEY || 'sk_test_mock_stackstorm_key_2026';
+const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_mock_stackstorm_key_2026';
 const STRIPE_WEBHOOK_SECRET =
   process.env.STRIPE_WEBHOOK_SECRET || 'whsec_mock_stackstorm_webhook_secret_key_2026';
 
