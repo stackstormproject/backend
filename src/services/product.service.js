@@ -250,25 +250,28 @@ const listProducts = async ({
   const productWhere = {};
   const variantWhere = {};
 
-  if (categoryId) {
-    let categoryIds = [categoryId];
-    try {
-      if (Category) {
-        const subCategories = await Category.findAll({
-          where: { parentId: categoryId, isActive: true },
-          attributes: ['id'],
-        });
-        if (subCategories && subCategories.length > 0) {
-          categoryIds = categoryIds.concat(subCategories.map((c) => c.id));
+  if (categoryId && categoryId !== 'all' && categoryId !== 'null' && categoryId !== 'undefined') {
+    const isNumeric = /^\d+$/.test(String(categoryId).trim());
+    if (isNumeric) {
+      const numericId = parseInt(categoryId, 10);
+      let categoryIds = [numericId];
+      try {
+        if (Category) {
+          const subCategories = await Category.findAll({
+            where: { parentId: numericId, isActive: true },
+            attributes: ['id'],
+          });
+          if (subCategories && subCategories.length > 0) {
+            categoryIds = categoryIds.concat(subCategories.map((c) => c.id));
+          }
         }
+      } catch (e) {
+        // Fall back to direct numericId
       }
-    } catch (e) {
-      // Fall back to direct categoryId
+      productWhere.categoryId = { [Op.in]: categoryIds };
+    } else {
+      productWhere.category = { [Op.iLike]: `%${String(categoryId).trim()}%` };
     }
-    productWhere[Op.or] = [
-      { categoryId: { [Op.in]: categoryIds } },
-      { category: String(categoryId) },
-    ];
   }
 
   if (minPrice !== undefined || maxPrice !== undefined) {
