@@ -30,6 +30,15 @@ const uploadImages = async (req, res, next) => {
         return file.location;
       }
 
+      // In non-test environments, missing file.location indicates an S3 upload failure (do not fail silently)
+      if (process.env.NODE_ENV !== 'test') {
+        throw ApiError.internal(
+          'File upload to storage failed: missing upload location from S3',
+          undefined,
+          'S3_UPLOAD_FAILED'
+        );
+      }
+
       const fileKey = file.key || `products/${crypto.randomUUID()}-${file.originalname}`;
       if (cdnBase) {
         return `${cdnBase.replace(/\/+$/, '')}/${fileKey}`;
