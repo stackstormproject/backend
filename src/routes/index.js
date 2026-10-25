@@ -7,6 +7,8 @@ const cartRouter = require('./cart.routes');
 const inventoryRouter = require('./inventory.routes');
 const wishlistRouter = require('./wishlist.routes');
 
+const userRouter = require('./user.routes');
+
 const router = Router();
 
 const healthHandler = (req, res) => {
@@ -16,6 +18,7 @@ const healthHandler = (req, res) => {
 router.get('/health', healthHandler);
 
 router.use('/auth', authRouter);
+router.use('/users', userRouter);
 router.use('/categories', categoryRouter);
 router.use('/products', productRouter);
 router.use('/upload', uploadRouter);
@@ -27,6 +30,7 @@ router.use('/wishlist', wishlistRouter);
 const v1Router = Router();
 v1Router.get('/health', healthHandler);
 v1Router.use('/auth', authRouter);
+v1Router.use('/users', userRouter);
 v1Router.use('/categories', categoryRouter);
 v1Router.use('/products', productRouter);
 v1Router.use('/upload', uploadRouter);
