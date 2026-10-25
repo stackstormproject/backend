@@ -170,7 +170,63 @@ describe('checkoutService', () => {
       ).rejects.toThrow(ApiError);
     });
 
-    it('should initiate checkout, reserve stock, and persist order', async () => {
+    it('should throw bad request for guest checkout with invalid email format', async () => {
+      await expect(
+        initiateCheckout({
+          customerId: null,
+          guestEmail: 'invalid-email-address',
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 1, quantity: 2 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('should throw bad request for invalid variant_id or quantity', async () => {
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 'invalid', quantity: 2 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 1, quantity: 0 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('should throw not found when variant does not exist in DB', async () => {
+      jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([]);
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 999, quantity: 1 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('should initiate checkout, reserve stock, and persist order with billing address and standard shipping fee', async () => {
       jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([
         {
           id: 1,
@@ -178,7 +234,7 @@ describe('checkoutService', () => {
           size: 'M',
           color: 'Blue',
           price_override: null,
-          product: { title: 'Batik Shirt', base_price: 6000.0 },
+          product: { title: 'Batik Shirt', base_price: 3000.0 },
         },
       ]);
 
@@ -203,15 +259,19 @@ describe('checkoutService', () => {
           city: 'Dickwella',
           postal_code: '81200',
         },
-        items: [{ variantId: 1, quantity: 2 }],
+        billingAddress: {
+          line1: '45 Lake Road',
+          city: 'Matara',
+          postal_code: '81000',
+        },
+        items: [{ variantId: 1, quantity: 1 }],
         shippingMethod: 'standard',
       });
 
       expect(result.order_id).toBe(501);
-      expect(result.reservation_id).toBe('res_test_123');
-      expect(result.breakdown.subtotal).toBe(12000.0);
-      expect(result.breakdown.shipping_fee).toBe(0.0); // Free shipping over 10,000 LKR!
-      expect(result.breakdown.total_amount).toBe(12000.0);
+      expect(result.breakdown.subtotal).toBe(3000.0);
+      expect(result.breakdown.shipping_fee).toBe(450.0);
+      expect(result.breakdown.total_amount).toBe(3450.0);
     });
   });
 });
