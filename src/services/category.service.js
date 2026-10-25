@@ -72,10 +72,13 @@ const getCategoryTree = async () => {
   try {
     const cachedTree = await redisClient.get(CACHE_KEY);
     if (cachedTree) {
-      return {
-        data: JSON.parse(cachedTree),
-        fromCache: true,
-      };
+      const parsed = JSON.parse(cachedTree);
+      if (Array.isArray(parsed) && parsed.length > 0) {
+        return {
+          data: parsed,
+          fromCache: true,
+        };
+      }
     }
   } catch (cacheErr) {
     logger.warn(
