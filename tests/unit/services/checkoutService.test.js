@@ -135,4 +135,143 @@ describe('checkoutService', () => {
       expect(typeof num2).toBe('string');
     });
   });
+
+  describe('initiateCheckout', () => {
+    const { initiateCheckout } = require('../../../src/services/checkout.service');
+    const { ProductVariant, Order, OrderItem } = require('../../../src/models');
+    const reservationService = require('../../../src/services/reservation.service');
+
+    it('should throw bad request for guest checkout without email', async () => {
+      await expect(
+        initiateCheckout({
+          customerId: null,
+          guestEmail: '',
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 1, quantity: 2 }],
+        })
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('should throw bad request for empty items list', async () => {
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [],
+        })
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('should throw bad request for guest checkout with invalid email format', async () => {
+      await expect(
+        initiateCheckout({
+          customerId: null,
+          guestEmail: 'invalid-email-address',
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 1, quantity: 2 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('should throw bad request for invalid variant_id or quantity', async () => {
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 'invalid', quantity: 2 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 1, quantity: 0 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('should throw not found when variant does not exist in DB', async () => {
+      jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([]);
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: {
+            line1: '123 Beach Road',
+            city: 'Dickwella',
+            postal_code: '81200',
+          },
+          items: [{ variantId: 999, quantity: 1 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('should initiate checkout, reserve stock, and persist order with billing address and standard shipping fee', async () => {
+      jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([
+        {
+          id: 1,
+          sku: 'BATIK-BLU-M',
+          size: 'M',
+          color: 'Blue',
+          price_override: null,
+          product: { title: 'Batik Shirt', base_price: 3000.0 },
+        },
+      ]);
+
+      jest.spyOn(reservationService, 'reserveStock').mockResolvedValue({
+        reservation_id: 'res_test_123',
+        expires_in: 900,
+      });
+
+      jest.spyOn(Order, 'create').mockResolvedValue({
+        id: 501,
+        status: 'payment_pending',
+        orderDate: new Date(),
+        guestOrderToken: null,
+      });
+
+      jest.spyOn(OrderItem, 'bulkCreate').mockResolvedValue([]);
+
+      const result = await initiateCheckout({
+        customerId: 4,
+        shippingAddress: {
+          line1: '123 Beach Road',
+          city: 'Dickwella',
+          postal_code: '81200',
+        },
+        billingAddress: {
+          line1: '45 Lake Road',
+          city: 'Matara',
+          postal_code: '81000',
+        },
+        items: [{ variantId: 1, quantity: 1 }],
+        shippingMethod: 'standard',
+      });
+
+      expect(result.order_id).toBe(501);
+      expect(result.breakdown.subtotal).toBe(3000.0);
+      expect(result.breakdown.shipping_fee).toBe(450.0);
+      expect(result.breakdown.total_amount).toBe(3450.0);
+    });
+  });
 });

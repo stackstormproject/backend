@@ -122,4 +122,86 @@ describe('cartService', () => {
       await expect(cartService.removeItem(OWNER, 3)).rejects.toMatchObject({ statusCode: 404 });
     });
   });
+
+  describe('mergeGuestCart', () => {
+    it('returns 0 merged items when guest cart does not exist', async () => {
+      Cart.findOne.mockResolvedValueOnce(null);
+
+      const result = await cartService.mergeGuestCart(4, 'guest_missing_token');
+      expect(result).toEqual({ mergedCount: 0, clamped: [] });
+    });
+
+    it('merges guest items into customer cart, clamping and dropping zero stock items', async () => {
+      const mockGuestCartDestroy = jest.fn().mockResolvedValue(true);
+      const guestCart = { id: 2, destroy: mockGuestCartDestroy };
+      Cart.findOne.mockResolvedValueOnce(guestCart);
+
+      const mockExistingSave = jest.fn().mockResolvedValue({});
+      const existingItem = {
+        id: 50,
+        cartId: 1,
+        productVariantId: 10,
+        quantity: 1,
+        save: mockExistingSave,
+      };
+
+      const guestItem1 = {
+        id: 101,
+        cartId: 2,
+        productVariantId: 10,
+        quantity: 2,
+        destroy: jest.fn().mockResolvedValue(true),
+      };
+      const guestItem2 = {
+        id: 102,
+        cartId: 2,
+        productVariantId: 20,
+        quantity: 3,
+        save: jest.fn().mockResolvedValue(true),
+      };
+      const guestItem3 = {
+        id: 103,
+        cartId: 2,
+        productVariantId: 30,
+        quantity: 1,
+        destroy: jest.fn().mockResolvedValue(true),
+      };
+
+      CartItem.findAll.mockResolvedValueOnce([guestItem1, guestItem2, guestItem3]);
+
+      ProductVariant.findByPk.mockImplementation(async (id) => {
+        if (id === 10) return { id: 10, stockQuantity: 5, reservedQuantity: 0 };
+        if (id === 20) return { id: 20, stockQuantity: 2, reservedQuantity: 0 }; // clamp 3 -> 2
+        if (id === 30) return { id: 30, stockQuantity: 0, reservedQuantity: 0 }; // out of stock
+        return null;
+      });
+
+      CartItem.findOne.mockImplementation(async ({ where }) => {
+        if (where.productVariantId === 10) return existingItem;
+        return null;
+      });
+
+      const res = await cartService.mergeGuestCart(4, 'guest_valid_token');
+
+      expect(res.mergedCount).toBe(3);
+      expect(res.clamped).toEqual([
+        { productVariantId: 20, requested: 3, applied: 2 },
+        { productVariantId: 30, requested: 1, applied: 0 },
+      ]);
+      expect(existingItem.quantity).toBe(3);
+      expect(mockExistingSave).toHaveBeenCalled();
+      expect(guestItem1.destroy).toHaveBeenCalled();
+      expect(guestItem2.cartId).toBe(1);
+      expect(guestItem2.quantity).toBe(2);
+      expect(guestItem2.save).toHaveBeenCalled();
+      expect(guestItem3.destroy).toHaveBeenCalled();
+      expect(mockGuestCartDestroy).toHaveBeenCalled();
+    });
+
+    it('rolls back transaction on database error during merge', async () => {
+      Cart.findOne.mockRejectedValueOnce(new Error('DB failure'));
+
+      await expect(cartService.mergeGuestCart(4, 'guest_token')).rejects.toThrow('DB failure');
+    });
+  });
 });
