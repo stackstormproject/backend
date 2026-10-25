@@ -8,6 +8,7 @@ function createLimiter({ windowMs, limit, message, skipSuccessfulRequests = fals
     standardHeaders: true,
     legacyHeaders: false,
     skipSuccessfulRequests,
+    validate: { xForwardedForHeader: false },
     ...(keyGenerator && { keyGenerator }),
     skip: () => process.env.DISABLE_RATE_LIMIT === 'true',
     handler: (req, res) => res.status(429).json({ error: 'TOO_MANY_REQUESTS', message }),
