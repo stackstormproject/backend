@@ -3,10 +3,11 @@ const {
   formatVariant,
   slugify,
   getProductBySlug,
+  createProduct,
   updateProduct,
   deleteProduct,
 } = require('../../../src/services/product.service');
-const { Product } = require('../../../src/models');
+const { Product, ProductVariant } = require('../../../src/models');
 const cacheService = require('../../../src/services/cache.service');
 
 describe('productDetail Service - Variant Matrix & Stock Availability', () => {
@@ -148,7 +149,69 @@ describe('productDetail Service - Variant Matrix & Stock Availability', () => {
     });
   });
 
+  describe('createProduct', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    it('should create product auto-generating slug from name when slug is omitted', async () => {
+      const createdObj = { id: 10, name: 'Handloom Cotton Kurta', slug: 'handloom-cotton-kurta' };
+      const createSpy = jest.spyOn(Product, 'create').mockResolvedValue(createdObj);
+      const invalidateSpy = jest.spyOn(cacheService, 'invalidateProductCache').mockResolvedValue();
+
+      const result = await createProduct({ name: 'Handloom Cotton Kurta', price: 4200 });
+
+      expect(createSpy).toHaveBeenCalledWith(
+        { name: 'Handloom Cotton Kurta', price: 4200, slug: 'handloom-cotton-kurta' },
+        {}
+      );
+      expect(invalidateSpy).toHaveBeenCalledWith(10, 'handloom-cotton-kurta');
+      expect(result).toEqual(createdObj);
+    });
+
+    it('should use provided slug when slug is present', async () => {
+      const createdObj = { id: 11, name: 'Custom Shirt', slug: 'custom-slug-123' };
+      const createSpy = jest.spyOn(Product, 'create').mockResolvedValue(createdObj);
+      jest.spyOn(cacheService, 'invalidateProductCache').mockResolvedValue();
+
+      const result = await createProduct({ name: 'Custom Shirt', slug: 'custom-slug-123', price: 3500 });
+
+      expect(createSpy).toHaveBeenCalledWith(
+        { name: 'Custom Shirt', slug: 'custom-slug-123', price: 3500 },
+        {}
+      );
+      expect(result.slug).toBe('custom-slug-123');
+    });
+
+    it('should include variants association when variants array is provided', async () => {
+      const variants = [{ sku: 'SKU-M', size: 'M', color: 'Blue', stockQuantity: 10 }];
+      const createdObj = { id: 12, name: 'Variants Shirt', slug: 'variants-shirt', variants };
+      const createSpy = jest.spyOn(Product, 'create').mockResolvedValue(createdObj);
+      jest.spyOn(cacheService, 'invalidateProductCache').mockResolvedValue();
+
+      await createProduct({ name: 'Variants Shirt', price: 3500, variants });
+
+      expect(createSpy).toHaveBeenCalledWith(
+        { name: 'Variants Shirt', price: 3500, slug: 'variants-shirt', variants },
+        { include: [{ model: ProductVariant, as: 'variants' }] }
+      );
+    });
+
+    it('should suppress cache invalidation errors safely', async () => {
+      const createdObj = { id: 13, name: 'Error Product', slug: 'error-product' };
+      jest.spyOn(Product, 'create').mockResolvedValue(createdObj);
+      jest.spyOn(cacheService, 'invalidateProductCache').mockRejectedValue(new Error('Redis down'));
+
+      const result = await createProduct({ name: 'Error Product', price: 2000 });
+      expect(result).toEqual(createdObj);
+    });
+  });
+
   describe('updateProduct', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
     it('should update product attributes and invalidate product cache', async () => {
       const mockProduct = {
         id: 1,
@@ -170,6 +233,22 @@ describe('productDetail Service - Variant Matrix & Stock Availability', () => {
       expect(invalidateSpy).toHaveBeenCalledWith(1, 'shirt-new');
     });
 
+    it('should not call invalidateProductCache a second time if slug did not change', async () => {
+      const mockProduct = {
+        id: 1,
+        slug: 'shirt',
+        update: jest.fn().mockResolvedValue(true),
+      };
+
+      jest.spyOn(Product, 'findByPk').mockResolvedValue(mockProduct);
+      const invalidateSpy = jest.spyOn(cacheService, 'invalidateProductCache').mockResolvedValue();
+
+      await updateProduct(1, { price: 3500 });
+
+      expect(invalidateSpy).toHaveBeenCalledTimes(1);
+      expect(invalidateSpy).toHaveBeenCalledWith(1, 'shirt');
+    });
+
     it('should throw not found when updating a non-existent product', async () => {
       jest.spyOn(Product, 'findByPk').mockResolvedValue(null);
 
@@ -180,6 +259,10 @@ describe('productDetail Service - Variant Matrix & Stock Availability', () => {
   });
 
   describe('deleteProduct', () => {
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
     it('should destroy product and invalidate product cache', async () => {
       const mockProduct = {
         id: 1,
