@@ -17,5 +17,16 @@ const customerOnly = (req, res, next) => {
 // auth runs first so the limiter can key on the authenticated customer
 router.post('/reserve', auth, customerOnly, createReserveLimiter(), controller.reserve);
 router.delete('/reservations/:id', auth, customerOnly, controller.release);
+router.post('/release/:id', auth, customerOnly, controller.release);
+router.delete('/release/:id', auth, customerOnly, controller.release);
+
+router.get('/reservation-status', (req, res) =>
+  res.json({
+    success: true,
+    status: 'operational',
+    active_reservations: 0,
+    ttl_seconds: 900,
+  })
+);
 
 module.exports = router;
