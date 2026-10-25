@@ -27,6 +27,19 @@ const getProductBySlug = async (req, res, next) => {
 };
 
 /**
+ * Controller for creating a new product (admin-only).
+ * E.g., POST /api/v1/products
+ */
+const createProduct = async (req, res, next) => {
+  try {
+    const product = await productService.createProduct(req.body);
+    return successResponse(res, product, 'Product created successfully', 201);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
  * Controller for retrieving paginated product catalog with multi-faceted filtering.
  * E.g., GET /api/v1/products?category_id=1&size=L&min_price=2000
  */
@@ -87,6 +100,7 @@ const deleteProduct = async (req, res, next) => {
 module.exports = {
   getProductBySlug,
   getProducts,
+  createProduct,
   updateProduct,
   deleteProduct,
 };

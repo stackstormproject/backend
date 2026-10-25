@@ -187,6 +187,34 @@ const getProductBySlug = async (slug) => {
 };
 
 /**
+ * Creates a new product with optional slug auto-generation.
+ *
+ * @param {object} data - Product attributes (name, price, description, ...)
+ * @returns {Promise<object>} Created product instance
+ */
+const createProduct = async (data) => {
+  // Auto-generate slug from name if not provided
+  const slug = data.slug || slugify(data.name);
+
+  // Normalize variants if provided
+  const hasVariants = Array.isArray(data.variants) && data.variants.length > 0;
+  const options = hasVariants ? { include: [{ model: ProductVariant, as: 'variants' }] } : {};
+
+  const product = await Product.create(
+    {
+      ...data,
+      slug,
+    },
+    options
+  );
+
+  // Invalidate any cache after creation
+  await cacheService.invalidateProductCache(product.id, slug).catch(() => {});
+
+  return product;
+};
+
+/**
  * Updates product details and purges matching Redis cache keys.
  *
  * @param {number|string} id - Product ID
@@ -247,14 +275,17 @@ const listProducts = async ({
   page = 1,
   limit = 12,
 }) => {
-  const productWhere = {};
+  const andConditions = [];
   const variantWhere = {};
 
   if (categoryId && categoryId !== 'all' && categoryId !== 'null' && categoryId !== 'undefined') {
-    const isNumeric = /^\d+$/.test(String(categoryId).trim());
+    const rawCat = String(categoryId).trim();
+    const isNumeric = /^\d+$/.test(rawCat);
+    let categoryIds = [];
+
     if (isNumeric) {
-      const numericId = parseInt(categoryId, 10);
-      let categoryIds = [numericId];
+      const numericId = parseInt(rawCat, 10);
+      categoryIds.push(numericId);
       try {
         if (Category) {
           const subCategories = await Category.findAll({
@@ -268,24 +299,136 @@ const listProducts = async ({
       } catch (e) {
         // Fall back to direct numericId
       }
-      productWhere.categoryId = { [Op.in]: categoryIds };
+      andConditions.push({ categoryId: { [Op.in]: categoryIds } });
     } else {
-      productWhere.category = { [Op.iLike]: `%${String(categoryId).trim()}%` };
+      const slug = rawCat.toLowerCase();
+      // Look up category by slug or name in Category model first
+      try {
+        if (Category) {
+          const matchedCategory = await Category.findOne({
+            where: {
+              [Op.or]: [{ slug }, { name: { [Op.iLike]: slug } }],
+            },
+            attributes: ['id'],
+          });
+          if (matchedCategory) {
+            categoryIds.push(matchedCategory.id);
+            const subs = await Category.findAll({
+              where: { parentId: matchedCategory.id, isActive: true },
+              attributes: ['id'],
+            });
+            if (subs && subs.length > 0) {
+              categoryIds = categoryIds.concat(subs.map((c) => c.id));
+            }
+          }
+        }
+      } catch (e) {
+        // Fall back to direct semantic string matching if Category lookup fails
+      }
+
+      // Build comprehensive semantic OR conditions for category/collection matching
+      const catOrConditions = [];
+      if (categoryIds.length > 0) {
+        catOrConditions.push({ categoryId: { [Op.in]: categoryIds } });
+      }
+
+      // Semantic mappings for top category bar & mega-menu shortcuts:
+      if (slug === 'men') {
+        catOrConditions.push(
+          { categoryId: 1 },
+          { category: 'Men' },
+          { category: { [Op.in]: ['Men', 'Shirts', 'Pants', 'T-Shirts', 'Jackets'] } }
+        );
+      } else if (slug === 'men-batik-shirts') {
+        catOrConditions.push(
+          { categoryId: 11 },
+          {
+            [Op.and]: [
+              { name: { [Op.iLike]: '%batik%' } },
+              { category: { [Op.notIn]: ['Women', 'Kids', 'Accessories'] } },
+            ],
+          }
+        );
+      } else if (slug === 'women') {
+        catOrConditions.push(
+          { category: 'Women' },
+          { category: { [Op.in]: ['Women', 'Saree', 'Saris', 'Dress', 'Kurti', 'Kaftan'] } },
+          { name: { [Op.iLike]: '%saree%' } },
+          { name: { [Op.iLike]: '%sari%' } },
+          { name: { [Op.iLike]: '%kurti%' } }
+        );
+      } else if (slug === 'women-silk-saris') {
+        catOrConditions.push(
+          { categoryId: 21 },
+          { name: { [Op.iLike]: '%saree%' } },
+          { name: { [Op.iLike]: '%sari%' } }
+        );
+      } else if (slug.includes('batik')) {
+        catOrConditions.push(
+          { name: { [Op.iLike]: '%batik%' } },
+          { description: { [Op.iLike]: '%batik%' } },
+          { material: { [Op.iLike]: '%batik%' } },
+          { category: { [Op.iLike]: '%batik%' } }
+        );
+      } else if (slug.includes('handloom')) {
+        catOrConditions.push(
+          { name: { [Op.iLike]: '%handloom%' } },
+          { description: { [Op.iLike]: '%handloom%' } },
+          { material: { [Op.iLike]: '%handloom%' } }
+        );
+      } else if (slug.includes('linen')) {
+        catOrConditions.push(
+          { name: { [Op.iLike]: '%linen%' } },
+          { description: { [Op.iLike]: '%linen%' } },
+          { material: { [Op.iLike]: '%linen%' } }
+        );
+      } else if (slug.includes('saree') || slug.includes('sari')) {
+        catOrConditions.push(
+          { name: { [Op.iLike]: '%saree%' } },
+          { name: { [Op.iLike]: '%sari%' } },
+          { category: { [Op.iLike]: '%saree%' } }
+        );
+      } else if (slug === 'kids' || slug.startsWith('kids-')) {
+        catOrConditions.push(
+          { category: 'Kids' },
+          { category: { [Op.iLike]: '%kid%' } },
+          { name: { [Op.iLike]: '%kid%' } }
+        );
+      } else if (slug === 'accessories' || slug.startsWith('accessories-')) {
+        catOrConditions.push(
+          { category: 'Accessories' },
+          { category: { [Op.iLike]: '%accessories%' } },
+          { category: { [Op.iLike]: '%shawl%' } },
+          { name: { [Op.iLike]: '%shawl%' } },
+          { name: { [Op.iLike]: '%belt%' } },
+          { name: { [Op.iLike]: '%bag%' } }
+        );
+      } else {
+        catOrConditions.push({ category: { [Op.iLike]: `%${slug}%` } });
+      }
+
+      andConditions.push({ [Op.or]: catOrConditions });
     }
   }
 
   if (minPrice !== undefined || maxPrice !== undefined) {
-    productWhere.price = {};
-    if (minPrice !== undefined) productWhere.price[Op.gte] = Number(minPrice);
-    if (maxPrice !== undefined) productWhere.price[Op.lte] = Number(maxPrice);
+    const priceWhere = {};
+    if (minPrice !== undefined) priceWhere[Op.gte] = Number(minPrice);
+    if (maxPrice !== undefined) priceWhere[Op.lte] = Number(maxPrice);
+    andConditions.push({ price: priceWhere });
   }
 
   if (search) {
-    productWhere[Op.or] = [
-      { name: { [Op.iLike]: `%${search}%` } },
-      { description: { [Op.iLike]: `%${search}%` } },
-    ];
+    andConditions.push({
+      [Op.or]: [
+        { name: { [Op.iLike]: `%${search}%` } },
+        { description: { [Op.iLike]: `%${search}%` } },
+        { category: { [Op.iLike]: `%${search}%` } },
+      ],
+    });
   }
+
+  const productWhere = andConditions.length > 0 ? { [Op.and]: andConditions } : {};
 
   if (size) {
     variantWhere.size = size;
@@ -380,6 +523,7 @@ module.exports = {
   formatVariant,
   fetchProductDetailFromDb,
   getProductBySlug,
+  createProduct,
   updateProduct,
   deleteProduct,
   invalidateProductCache: cacheService.invalidateProductCache,
