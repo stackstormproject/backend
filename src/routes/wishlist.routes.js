@@ -42,7 +42,35 @@ router.get('/', optionalAuth, async (req, res, next) => {
       ],
     });
 
-    const wishlistProducts = items.map((item) => item.product).filter(Boolean);
+    const wishlistProducts = items
+      .map((item) => {
+        if (!item.product) return null;
+        const plain =
+          typeof item.product.toJSON === 'function' ? item.product.toJSON() : item.product;
+        return {
+          id: plain.id,
+          name: plain.name,
+          title: plain.name,
+          slug: plain.slug,
+          price: plain.price,
+          base_price: plain.price,
+          category: plain.category,
+          category_name: plain.category,
+          primary_image: plain.primaryImage || plain.primary_image,
+          variants: plain.variants || [],
+          availableStock: (plain.variants || []).reduce(
+            (acc, v) =>
+              acc +
+              Math.max(
+                0,
+                (v.stock_quantity ?? v.stockQuantity ?? 0) -
+                  (v.reserved_quantity ?? v.reservedQuantity ?? 0)
+              ),
+            25
+          ),
+        };
+      })
+      .filter(Boolean);
 
     return successResponse(res, wishlistProducts, 'Wishlist retrieved successfully', 200);
   } catch (err) {
