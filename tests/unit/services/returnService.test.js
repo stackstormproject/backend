@@ -1,0 +1,129 @@
+const ApiError = require('../../../src/utils/ApiError');
+
+jest.mock('../../../src/models', () => {
+  return {
+    Return: {
+      findOne: jest.fn(),
+      findByPk: jest.fn(),
+      findAndCountAll: jest.fn(),
+      create: jest.fn(),
+    },
+    Order: {},
+    OrderItem: {
+      findByPk: jest.fn(),
+    },
+    ProductVariant: {
+      findByPk: jest.fn(),
+    },
+    Product: {},
+  };
+});
+
+const { Return, OrderItem, ProductVariant } = require('../../../src/models');
+const {
+  requestReturn,
+  getCustomerReturns,
+  getReturnById,
+} = require('../../../src/services/return.service');
+
+describe('returnService', () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
+  describe('requestReturn', () => {
+    it('throws validation error if reason is missing', async () => {
+      await expect(
+        requestReturn({ customerId: 4, orderItemId: 1, reason: '' })
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('throws forbidden if order does not belong to customer', async () => {
+      OrderItem.findByPk.mockResolvedValue({
+        id: 1,
+        order: { customerId: 99 },
+      });
+
+      await expect(
+        requestReturn({ customerId: 4, orderItemId: 1, reason: 'Wrong size' })
+      ).rejects.toThrow(ApiError);
+    });
+
+    it('creates return request with refund amount calculation', async () => {
+      OrderItem.findByPk.mockResolvedValue({
+        id: 1,
+        orderId: 10,
+        subtotal: 4850.0,
+        order: { customerId: 4 },
+      });
+      Return.findOne.mockResolvedValue(null);
+      Return.create.mockResolvedValue({
+        id: 77,
+        orderId: 10,
+        orderItemId: 1,
+        type: 'return',
+        exchangeVariantId: null,
+        reason: 'Too large',
+        status: 'requested',
+        refundAmount: 4850.0,
+        createdAt: new Date(),
+      });
+
+      const res = await requestReturn({
+        customerId: 4,
+        orderItemId: 1,
+        type: 'return',
+        reason: 'Too large',
+      });
+
+      expect(res.id).toBe(77);
+      expect(res.refund_amount).toBe(4850.0);
+      expect(res.status).toBe('requested');
+    });
+
+    it('validates exchange variant existence for exchange type', async () => {
+      OrderItem.findByPk.mockResolvedValue({
+        id: 1,
+        orderId: 10,
+        subtotal: 4850.0,
+        order: { customerId: 4 },
+      });
+      Return.findOne.mockResolvedValue(null);
+      ProductVariant.findByPk.mockResolvedValue(null);
+
+      await expect(
+        requestReturn({
+          customerId: 4,
+          orderItemId: 1,
+          type: 'exchange',
+          exchangeVariantId: 999,
+          reason: 'Need size L',
+        })
+      ).rejects.toThrow(ApiError);
+    });
+  });
+
+  describe('getCustomerReturns', () => {
+    it('returns paginated return requests', async () => {
+      Return.findAndCountAll.mockResolvedValue({
+        count: 1,
+        rows: [
+          {
+            id: 77,
+            orderId: 10,
+            orderItemId: 1,
+            type: 'return',
+            reason: 'Too large',
+            status: 'requested',
+            refundAmount: 4850.0,
+            orderItem: { variant: { sku: 'BATIK-M', product: { title: 'Shirt' } } },
+          },
+        ],
+      });
+
+      const res = await getCustomerReturns(4, { page: 1, limit: 10 });
+      expect(res.returns).toHaveLength(1);
+      expect(res.returns[0].product_title).toBe('Shirt');
+    });
+  });
+});
