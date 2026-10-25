@@ -62,7 +62,8 @@ module.exports = {
         category: 'Shirts',
         brand: 'Dickwella',
         is_final_sale: false,
-        primary_image: 'https://example.com/shirt1.jpg',
+        primary_image:
+          'https://images.unsplash.com/photo-1596755094514-f87e34085b2c?auto=format&fit=crop&w=800&q=80',
         created_at: now,
         updated_at: now,
       },
@@ -73,7 +74,8 @@ module.exports = {
         category: 'Pants',
         brand: 'Dickwella',
         is_final_sale: false,
-        primary_image: 'https://example.com/chinos1.jpg',
+        primary_image:
+          'https://images.unsplash.com/photo-1624378439575-d8705ad7ae80?auto=format&fit=crop&w=800&q=80',
         created_at: now,
         updated_at: now,
       },
@@ -84,7 +86,8 @@ module.exports = {
         category: 'Shirts',
         brand: 'Dickwella',
         is_final_sale: false,
-        primary_image: 'https://example.com/linen1.jpg',
+        primary_image:
+          'https://images.unsplash.com/photo-1598033129183-c4f50c736f10?auto=format&fit=crop&w=800&q=80',
         created_at: now,
         updated_at: now,
       },
@@ -95,7 +98,8 @@ module.exports = {
         category: 'Jackets',
         brand: 'Dickwella',
         is_final_sale: true,
-        primary_image: 'https://example.com/denim1.jpg',
+        primary_image:
+          'https://images.unsplash.com/photo-1576995853123-5a10305d93c0?auto=format&fit=crop&w=800&q=80',
         created_at: now,
         updated_at: now,
       },
@@ -106,7 +110,8 @@ module.exports = {
         category: 'T-Shirts',
         brand: 'Dickwella',
         is_final_sale: false,
-        primary_image: 'https://example.com/polo1.jpg',
+        primary_image:
+          'https://images.unsplash.com/photo-1620012253295-c15c429f66bf?auto=format&fit=crop&w=800&q=80',
         created_at: now,
         updated_at: now,
       },
