@@ -1,6 +1,6 @@
 const express = require('express');
 const request = require('supertest');
-const { createLimiter } = require('../../../src/middleware/rateLimiter');
+const { createLimiter, createReserveLimiter } = require('../../../src/middleware/rateLimiter');
 
 const makeApp = (limit) => {
   const app = express();
@@ -34,5 +34,24 @@ describe('createLimiter', () => {
     const second = await request(app).get('/x');
 
     expect(second.status).toBe(200);
+  });
+
+  it('should key createReserveLimiter by user id or fallback to ip', async () => {
+    process.env.DISABLE_RATE_LIMIT = 'false';
+    const limiter = createReserveLimiter({ limit: 5 });
+    const app = express();
+    app.use((req, res, next) => {
+      req.user = { userId: 42 };
+      next();
+    });
+    app.get('/reserve', limiter, (req, res) => res.json({ ok: true }));
+
+    const res = await request(app).get('/reserve');
+    expect(res.status).toBe(200);
+
+    const guestApp = express();
+    guestApp.get('/reserve-guest', limiter, (req, res) => res.json({ ok: true }));
+    const guestRes = await request(guestApp).get('/reserve-guest');
+    expect(guestRes.status).toBe(200);
   });
 });
