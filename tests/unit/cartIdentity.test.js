@@ -1,5 +1,9 @@
 const jwt = require('jsonwebtoken');
-const { resolveCartIdentity, optionalAuth } = require('../../src/middleware/cartIdentity');
+const {
+  resolveCartIdentity,
+  optionalAuth,
+  requireCustomer,
+} = require('../../src/middleware/cartIdentity');
 
 const mockRes = () => {
   const res = {};
@@ -99,5 +103,36 @@ describe('optionalAuth', () => {
     optionalAuth(req, res, jest.fn());
 
     expect(res.status).toHaveBeenCalledWith(401);
+  });
+});
+
+describe('requireCustomer', () => {
+  it('returns 401 if req.user is missing', () => {
+    const req = {};
+    const res = mockRes();
+    const next = jest.fn();
+
+    requireCustomer(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('returns 401 if user role is admin', () => {
+    const req = { user: { id: 1, role: 'admin' } };
+    const res = mockRes();
+    const next = jest.fn();
+
+    requireCustomer(req, res, next);
+    expect(res.status).toHaveBeenCalledWith(401);
+    expect(next).not.toHaveBeenCalled();
+  });
+
+  it('calls next if user is a valid customer', () => {
+    const req = { user: { id: 4, role: 'customer' } };
+    const res = mockRes();
+    const next = jest.fn();
+
+    requireCustomer(req, res, next);
+    expect(next).toHaveBeenCalled();
   });
 });
