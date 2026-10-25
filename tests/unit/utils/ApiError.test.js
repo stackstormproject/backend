@@ -39,10 +39,46 @@ describe('ApiError', () => {
     expect(err.code).toBe('FORBIDDEN');
   });
 
-  it('should create a 500 internal error', () => {
-    const err = ApiError.internal('Database crash');
-    expect(err.statusCode).toBe(500);
-    expect(err.message).toBe('Database crash');
-    expect(err.code).toBe('INTERNAL_ERROR');
+  it('should create a 409 conflict error', () => {
+    const err = ApiError.conflict('Duplicate email', { field: 'email' }, 'DUPLICATE_EMAIL');
+    expect(err.statusCode).toBe(409);
+    expect(err.message).toBe('Duplicate email');
+    expect(err.details).toEqual({ field: 'email' });
+    expect(err.code).toBe('DUPLICATE_EMAIL');
+  });
+
+  it('should use default parameter values across all static helper methods', () => {
+    const base = new ApiError(500, 'Base error');
+    expect(base.code).toBe('ERROR');
+
+    const notFound = ApiError.notFound();
+    expect(notFound.statusCode).toBe(404);
+    expect(notFound.message).toBe('Resource not found');
+    expect(notFound.code).toBe('NOT_FOUND');
+
+    const badReq = ApiError.badRequest();
+    expect(badReq.statusCode).toBe(400);
+    expect(badReq.message).toBe('Bad request');
+    expect(badReq.code).toBe('BAD_REQUEST');
+
+    const unauth = ApiError.unauthorized();
+    expect(unauth.statusCode).toBe(401);
+    expect(unauth.message).toBe('Unauthorized');
+    expect(unauth.code).toBe('UNAUTHORIZED');
+
+    const forbidden = ApiError.forbidden();
+    expect(forbidden.statusCode).toBe(403);
+    expect(forbidden.message).toBe('Forbidden');
+    expect(forbidden.code).toBe('FORBIDDEN');
+
+    const conflict = ApiError.conflict();
+    expect(conflict.statusCode).toBe(409);
+    expect(conflict.message).toBe('Conflict');
+    expect(conflict.code).toBe('CONFLICT');
+
+    const internal = ApiError.internal();
+    expect(internal.statusCode).toBe(500);
+    expect(internal.message).toBe('Internal server error');
+    expect(internal.code).toBe('INTERNAL_ERROR');
   });
 });
