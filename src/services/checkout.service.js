@@ -4,9 +4,11 @@
 // 10,000 LKR free shipping threshold, and builds the immutable Order contract.
 // ==============================================================================
 
-// const { Order, OrderItem, ProductVariant, Product, sequelize } = require('../models');
-// const reservationService = require('./reservation.service');
+const crypto = require('crypto');
+const { Order, OrderItem, ProductVariant, Product, sequelize } = require('../models');
+const reservationService = require('./reservation.service');
 const ApiError = require('../utils/ApiError');
+const logger = require('../config/logger');
 
 // Business Rule Constants
 const FREE_SHIPPING_THRESHOLD_LKR = 10000.0; // 10,000 LKR
@@ -86,10 +88,199 @@ const generateOrderNumber = () => {
   return `DFC-${dateStr}-${rand}`;
 };
 
+/**
+ * Validates email format.
+ *
+ * @param {string} email
+ * @returns {boolean}
+ */
+const isValidEmail = (email) => {
+  const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+  return emailRegex.test(String(email).trim());
+};
+
+/**
+ * Initiates checkout for guest or authenticated customer.
+ * Creates an Order in 'payment_pending' status, reserves inventory for 15 minutes,
+ * and snapshots order line items.
+ *
+ * @param {object} checkoutData
+ * @returns {Promise<object>} Order summary envelope with LKR totals and reservation metadata
+ */
+const initiateCheckout = async (checkoutData = {}) => {
+  const customerId = checkoutData.customerId || checkoutData.userId || null;
+  const guestEmail = (checkoutData.guestEmail || checkoutData.guest_email || '').trim();
+  const rawItems = checkoutData.items || [];
+  const rawAddress = checkoutData.shippingAddress || checkoutData.shipping_address;
+  const rawBillingAddress = checkoutData.billingAddress || checkoutData.billing_address;
+  const shippingMethod = checkoutData.shippingMethod || checkoutData.shippingOption || 'standard';
+  const notes = checkoutData.notes || null;
+
+  // 1. Identity validation: Guests must provide a valid email
+  if (!customerId) {
+    if (!guestEmail) {
+      throw ApiError.badRequest('Guest checkout requires a valid email address');
+    }
+    if (!isValidEmail(guestEmail)) {
+      throw ApiError.badRequest('Invalid guest email address format');
+    }
+  }
+
+  // 2. Validate shipping address
+  const shippingAddressSnapshot = validateShippingAddress(rawAddress);
+  const billingAddressSnapshot = rawBillingAddress
+    ? validateShippingAddress(rawBillingAddress)
+    : shippingAddressSnapshot;
+
+  // 3. Validate line items
+  if (!Array.isArray(rawItems) || rawItems.length === 0) {
+    throw ApiError.badRequest('Checkout items list must contain at least one line item');
+  }
+
+  const normalizedItems = rawItems.map((item) => {
+    const variantId = Number(item.variant_id ?? item.variantId ?? item.id);
+    const quantity = parseInt(item.quantity, 10);
+    if (!variantId || Number.isNaN(variantId)) {
+      throw ApiError.badRequest('Each checkout item must have a valid variant_id');
+    }
+    if (!quantity || quantity < 1) {
+      throw ApiError.badRequest('Item quantity must be a positive integer greater than 0');
+    }
+    return { variantId, quantity };
+  });
+
+  // 4. Resolve Item Prices, Snapshot Data, and Calculate Totals
+  const variantIds = normalizedItems.map((i) => i.variantId);
+  const variants = await ProductVariant.findAll({
+    where: { id: variantIds },
+    include: [{ model: Product, as: 'product' }],
+  });
+
+  const variantMap = new Map();
+  variants.forEach((v) => variantMap.set(Number(v.id), v));
+
+  let subtotal = 0;
+  const resolvedItems = normalizedItems.map((reqItem) => {
+    const dbVariant = variantMap.get(reqItem.variantId);
+    if (!dbVariant) {
+      throw ApiError.notFound(`Variant with ID '${reqItem.variantId}' not found`);
+    }
+
+    const prod = dbVariant.product || {};
+    const unitPrice = dbVariant.price_override
+      ? Number(dbVariant.price_override)
+      : Number(prod.base_price || 0);
+    const lineTotal = Number((unitPrice * reqItem.quantity).toFixed(2));
+    subtotal += lineTotal;
+
+    return {
+      variantId: dbVariant.id,
+      product_variant_id: dbVariant.id,
+      quantity: reqItem.quantity,
+      unitPrice,
+      unit_price: unitPrice,
+      subtotal: lineTotal,
+      total_price: lineTotal,
+      title: prod.title || 'Apparel Item',
+      sku: dbVariant.sku,
+      size: dbVariant.size,
+      color: dbVariant.color,
+    };
+  });
+
+  // 5. Calculate shipping & totals
+  const shippingFee = calculateShippingFee(subtotal, shippingMethod);
+  const discountAmount = 0.0;
+  const totalAmount = Number((subtotal + shippingFee - discountAmount).toFixed(2));
+  const guestOrderToken = !customerId ? crypto.randomBytes(16).toString('hex') : null;
+
+  // 6. 15-Minute Temporary Stock Reservation
+  const reservationResult = await reservationService.reserveStock({
+    customerId,
+    items: normalizedItems,
+  });
+
+  const reservationId = reservationResult.reservation_id;
+
+  // 7. Persist Order and Line Items in Managed DB Transaction
+  let createdOrder;
+  const createOrderAction = async (t) => {
+    const orderRecord = await Order.create(
+      {
+        customerId: customerId || null,
+        guestEmail: customerId ? null : guestEmail,
+        guestOrderToken,
+        orderDate: new Date(),
+        status: 'payment_pending',
+        shippingAddress: JSON.stringify(shippingAddressSnapshot),
+        billingAddress: JSON.stringify(billingAddressSnapshot),
+        shippingOption: shippingMethod,
+        shippingCost: shippingFee,
+        taxAmount: 0.0,
+        discountAmount,
+        totalAmount,
+        notes,
+      },
+      { transaction: t }
+    );
+
+    const lineItemsPayload = resolvedItems.map((item) => ({
+      orderId: orderRecord.id,
+      variantId: item.variantId,
+      quantity: item.quantity,
+      unitPrice: item.unitPrice,
+      subtotal: item.subtotal,
+    }));
+
+    await OrderItem.bulkCreate(lineItemsPayload, { transaction: t });
+    return orderRecord;
+  };
+
+  if (sequelize && typeof sequelize.transaction === 'function') {
+    createdOrder = await sequelize.transaction(createOrderAction);
+  } else {
+    createdOrder = await createOrderAction(null);
+  }
+
+  logger.info(
+    `[CHECKOUT] Order #${createdOrder.id} initiated for customer ${customerId || 'guest'} (reservation: ${reservationId})`
+  );
+
+  return {
+    order_id: createdOrder.id,
+    orderId: createdOrder.id,
+    customer_id: customerId,
+    customerId,
+    is_guest: !customerId,
+    guest_order_token: guestOrderToken,
+    guestOrderToken,
+    status: createdOrder.status,
+    reservation_id: reservationId,
+    reservationId,
+    expires_in: reservationService.RESERVATION_TTL_SECONDS || 900,
+    currency: 'LKR',
+    breakdown: {
+      subtotal: Number(subtotal.toFixed(2)),
+      shipping_fee: Number(shippingFee.toFixed(2)),
+      discount_amount: Number(discountAmount.toFixed(2)),
+      total_amount: totalAmount,
+      formatted_subtotal: `LKR ${subtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      formatted_shipping: `LKR ${shippingFee.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+      formatted_total: `LKR ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
+    },
+    items: resolvedItems,
+    shipping_address: shippingAddressSnapshot,
+    billing_address: billingAddressSnapshot,
+    created_at: createdOrder.orderDate || createdOrder.createdAt,
+  };
+};
+
 module.exports = {
   validateShippingAddress,
   calculateShippingFee,
   generateOrderNumber,
+  isValidEmail,
+  initiateCheckout,
   FREE_SHIPPING_THRESHOLD_LKR,
   STANDARD_SHIPPING_FEE_LKR,
 };
