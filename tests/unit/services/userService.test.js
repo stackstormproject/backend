@@ -120,6 +120,19 @@ describe('userService', () => {
   });
 
   describe('updateProfile', () => {
+    it('throws unauthorized if customerId is missing', async () => {
+      await expect(updateProfile(null, { name: 'Test' })).rejects.toMatchObject({
+        statusCode: 401,
+      });
+    });
+
+    it('throws not found if customer does not exist', async () => {
+      Customer.findByPk.mockResolvedValue(null);
+      await expect(updateProfile(999, { name: 'Test' })).rejects.toMatchObject({
+        statusCode: 404,
+      });
+    });
+
     it('throws bad request if phone number format is invalid', async () => {
       Customer.findByPk.mockResolvedValue({
         id: 4,
@@ -155,6 +168,10 @@ describe('userService', () => {
   });
 
   describe('getAddresses', () => {
+    it('throws unauthorized if customerId is missing', async () => {
+      await expect(getAddresses(null)).rejects.toMatchObject({ statusCode: 401 });
+    });
+
     it('returns customer address list', async () => {
       Address.findAll.mockResolvedValue([
         {
@@ -175,9 +192,16 @@ describe('userService', () => {
   });
 
   describe('addAddress', () => {
+    it('throws unauthorized if customerId is missing', async () => {
+      await expect(addAddress(null, {})).rejects.toMatchObject({ statusCode: 401 });
+    });
+
     it('validates required fields', async () => {
       await expect(addAddress(4, { city: 'Colombo' })).rejects.toThrow(ApiError);
       await expect(addAddress(4, { address_line1: 'Road' })).rejects.toThrow(ApiError);
+      await expect(
+        addAddress(4, { address_line1: 'Road', city: 'Colombo', postal_code: '' })
+      ).rejects.toThrow(ApiError);
     });
 
     it('creates address and marks as default if requested or first address', async () => {
@@ -204,6 +228,19 @@ describe('userService', () => {
   });
 
   describe('updateAddress', () => {
+    it('throws unauthorized if customerId is missing', async () => {
+      await expect(updateAddress(null, 1, {})).rejects.toMatchObject({ statusCode: 401 });
+    });
+
+    it('throws bad request if addressId is missing', async () => {
+      await expect(updateAddress(4, null, {})).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('throws not found if address does not exist', async () => {
+      Address.findByPk.mockResolvedValue(null);
+      await expect(updateAddress(4, 999, {})).rejects.toMatchObject({ statusCode: 404 });
+    });
+
     it('throws forbidden if address belongs to another customer', async () => {
       Address.findByPk.mockResolvedValue({
         id: 55,
@@ -213,14 +250,14 @@ describe('userService', () => {
       await expect(updateAddress(4, 55, { city: 'Galle' })).rejects.toThrow(ApiError);
     });
 
-    it('updates address fields cleanly', async () => {
+    it('updates address fields cleanly and handles isDefault toggle', async () => {
       const mockUpdate = jest.fn().mockImplementation((fields) => ({
         id: 55,
         customerId: 4,
         addressLine1: fields.addressLine1 || 'Old St',
         city: fields.city || 'Old City',
         postalCode: '81200',
-        isDefault: false,
+        isDefault: fields.isDefault ?? false,
       }));
 
       Address.findByPk.mockResolvedValue({
@@ -231,13 +268,68 @@ describe('userService', () => {
         update: mockUpdate,
       });
 
-      const updated = await updateAddress(4, 55, { city: 'New City' });
-      expect(mockUpdate).toHaveBeenCalledWith(expect.objectContaining({ city: 'New City' }), expect.anything());
+      const updated = await updateAddress(4, 55, {
+        city: 'New City',
+        is_default: true,
+        address_line1: 'Updated St',
+        address_line2: 'Suite 2',
+        state: 'Southern',
+        postal_code: '81200',
+        country: 'Sri Lanka',
+      });
+      expect(mockUpdate).toHaveBeenCalledWith(
+        expect.objectContaining({ city: 'New City', isDefault: true }),
+        expect.anything()
+      );
       expect(updated.city).toBe('New City');
+    });
+
+    it('updates address to setDefault via helper', async () => {
+      const mockUpdate = jest.fn().mockImplementation((fields) => ({
+        id: 55,
+        customerId: 4,
+        addressLine1: 'Old St',
+        city: 'Old City',
+        postalCode: '81200',
+        isDefault: fields.isDefault,
+      }));
+
+      Address.findByPk.mockResolvedValue({
+        id: 55,
+        customerId: 4,
+        addressLine1: 'Old St',
+        city: 'Old City',
+        update: mockUpdate,
+      });
+
+      const updated = await setDefaultAddress(4, 55);
+      expect(updated.is_default).toBe(true);
     });
   });
 
   describe('deleteAddress', () => {
+    it('throws unauthorized if customerId is missing', async () => {
+      await expect(deleteAddress(null, 1)).rejects.toMatchObject({ statusCode: 401 });
+    });
+
+    it('throws bad request if addressId is missing', async () => {
+      await expect(deleteAddress(4, null)).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('throws not found if address does not exist', async () => {
+      Address.findByPk.mockResolvedValue(null);
+      await expect(deleteAddress(4, 999)).rejects.toMatchObject({ statusCode: 404 });
+    });
+
+    it('throws forbidden if address belongs to another customer', async () => {
+      Address.findByPk.mockResolvedValue({
+        id: 20,
+        customerId: 99,
+      });
+
+      await expect(deleteAddress(4, 20)).rejects.toMatchObject({ statusCode: 403 });
+    });
+
     it('destroys address and promotes next if default', async () => {
       const mockDestroy = jest.fn();
       const mockPromote = jest.fn();
@@ -257,6 +349,20 @@ describe('userService', () => {
       const result = await deleteAddress(4, 20);
       expect(mockDestroy).toHaveBeenCalled();
       expect(mockPromote).toHaveBeenCalledWith({ isDefault: true });
+      expect(result.deleted).toBe(true);
+    });
+
+    it('destroys address without promoting when address was not default', async () => {
+      const mockDestroy = jest.fn();
+      Address.findByPk.mockResolvedValue({
+        id: 25,
+        customerId: 4,
+        isDefault: false,
+        destroy: mockDestroy,
+      });
+
+      const result = await deleteAddress(4, 25);
+      expect(mockDestroy).toHaveBeenCalled();
       expect(result.deleted).toBe(true);
     });
   });
