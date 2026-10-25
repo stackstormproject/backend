@@ -24,15 +24,15 @@ const fileFilter = (req, file, cb) => {
 };
 
 const getStorage = () => {
-  const hasAwsCreds =
-    process.env.AWS_ACCESS_KEY_ID &&
-    process.env.AWS_SECRET_ACCESS_KEY &&
-    process.env.AWS_ACCESS_KEY_ID !== 'xxx';
-
-  if (!hasAwsCreds || (process.env.NODE_ENV === 'test' && !process.env.FORCE_S3_STORAGE)) {
+  // Use memory storage only in test mode (unless explicitly forced) or if explicitly requested
+  if (
+    (process.env.NODE_ENV === 'test' && !process.env.FORCE_S3_STORAGE) ||
+    process.env.USE_MEMORY_STORAGE === 'true'
+  ) {
     return multer.memoryStorage();
   }
 
+  // Uses AWS S3 via multer-s3 (supports IAM roles via AWS SDK default credential provider chain and explicit keys)
   return multerS3({
     s3: s3Client,
     bucket: bucketName,
