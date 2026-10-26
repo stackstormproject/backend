@@ -269,13 +269,28 @@ function initSocketServer(httpServer, options = {}) {
             await session.save();
           }
 
+          const isAgentJoining =
+            isAgent ||
+            socket.isAgent ||
+            payload.isAgent === true ||
+            payload.role === 'support_agent' ||
+            payload.senderRole === 'support_agent';
+
+          if (isAgentJoining) {
+            socket.isAgent = true;
+            socket.join('admin_support_channel');
+          }
+
           // If support agent is joining, claim the session
-          if (isAgent && !session.agentId) {
-            session.agentId = socket.user.userId || socket.user.id || 1;
+          if (isAgentJoining && !session.agentId) {
+            session.agentId = socket.user?.userId || socket.user?.id || 1;
             session.status = 'open';
             await session.save();
 
-            const agentName = socket.user?.name || 'Alex (Support Agent)';
+            const agentName =
+              socket.user?.name && socket.user.name !== 'Guest'
+                ? socket.user.name
+                : payload.senderName || 'Alex (Support Agent)';
             const joinMsg = await ChatMessage.create({
               chatSessionId: session.id,
               senderType: 'agent',
@@ -287,6 +302,8 @@ function initSocketServer(httpServer, options = {}) {
               id: `msg-${joinMsg.id}`,
               sessionId: session.id,
               senderRole: 'support_agent',
+              senderType: 'agent',
+              sender: 'agent',
               senderName: agentName,
               message: joinMsg.message,
               createdAt:
@@ -367,13 +384,34 @@ function initSocketServer(httpServer, options = {}) {
           return;
         }
 
-        const senderRole = isAgent ? 'support_agent' : 'customer';
+        const isMessageFromAgent = Boolean(
+          isAgent ||
+          socket.isAgent ||
+          (socket.rooms && socket.rooms.has('admin_support_channel')) ||
+          payload.isAgent === true ||
+          payload.senderRole === 'support_agent' ||
+          payload.senderRole === 'agent' ||
+          payload.senderType === 'agent' ||
+          payload.sender === 'agent' ||
+          payload.role === 'support_agent'
+        );
+
+        if (isMessageFromAgent && !socket.isAgent) {
+          socket.isAgent = true;
+          socket.join('admin_support_channel');
+        }
+
+        const senderRole = isMessageFromAgent ? 'support_agent' : 'customer';
+        const senderType = isMessageFromAgent ? 'agent' : 'customer';
+        const senderName = isMessageFromAgent
+          ? (socket.user?.name && socket.user.name !== 'Guest' ? socket.user.name : payload.senderName || 'Alex (Support Agent)')
+          : (socket.user?.name && socket.user.name !== 'Guest' ? socket.user.name : payload.senderName || 'Customer');
 
         // Persist message in PostgreSQL
         const chatMsg = await ChatMessage.create({
           chatSessionId: sessionId,
-          senderType: isAgent ? 'agent' : 'customer',
-          senderId: socket.user?.id || socket.user?.userId || null,
+          senderType,
+          senderId: isMessageFromAgent ? (socket.user?.id || 1) : (socket.user?.id || socket.user?.userId || null),
           message: message.trim(),
         });
 
@@ -381,7 +419,9 @@ function initSocketServer(httpServer, options = {}) {
           id: `msg-${chatMsg.id}`,
           sessionId,
           senderRole,
-          senderName: socket.user?.name || (isAgent ? 'Support Agent' : 'Customer'),
+          senderType,
+          sender: senderType,
+          senderName,
           message: chatMsg.message,
           createdAt:
             chatMsg.createdAt instanceof Date
@@ -398,7 +438,7 @@ function initSocketServer(httpServer, options = {}) {
         }
 
         // Automated Virtual Assistant response when no human agent has claimed the session
-        if (!isAgent) {
+        if (!isMessageFromAgent) {
           ChatSession.findByPk(sessionId)
             .then(async (session) => {
               if (session && !session.agentId) {
