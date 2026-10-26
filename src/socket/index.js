@@ -296,8 +296,7 @@ function initSocketServer(httpServer, options = {}) {
             };
 
             const room = `chat_session_${session.id}`;
-            io.to(room).emit('chat:message', joinPayload);
-            io.to('admin_support_channel').emit('chat:message', joinPayload);
+            io.to(room).to('admin_support_channel').emit('chat:message', joinPayload);
           }
         } else {
           // Customer joining or resuming an open session
@@ -391,10 +390,8 @@ function initSocketServer(httpServer, options = {}) {
         };
 
         const roomName = `chat_session_${sessionId}`;
-        // Broadcast to all sockets in the session room (customer + agent)
-        io.to(roomName).emit('chat:message', messagePayload);
-        // Also broadcast to admin support channel so queue updates preview and messages
-        io.to('admin_support_channel').emit('chat:message', messagePayload);
+        // Broadcast to all sockets in session room and admin channel without duplicate delivery
+        io.to(roomName).to('admin_support_channel').emit('chat:message', messagePayload);
 
         if (typeof callback === 'function') {
           callback({ success: true, message: messagePayload });
@@ -470,8 +467,7 @@ function initSocketServer(httpServer, options = {}) {
                           : botChatMsg.createdAt || new Date().toISOString(),
                     };
 
-                    io.to(roomName).emit('chat:message', botPayload);
-                    io.to('admin_support_channel').emit('chat:message', botPayload);
+                    io.to(roomName).to('admin_support_channel').emit('chat:message', botPayload);
                     io.to(roomName).emit('chat:typing', {
                       sessionId,
                       isTyping: false,

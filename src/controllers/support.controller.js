@@ -127,9 +127,8 @@ const updateSessionStatus = async (req, res, next) => {
           message: resolveMsg.message,
           createdAt: resolveMsg.createdAt.toISOString(),
         };
-        io.to(roomName).emit('chat:message', payload);
-        io.to(roomName).emit('chat:session_resolved', { sessionId: session.id.toString() });
-        io.to('admin_support_channel').emit('chat:message', payload);
+        io.to(roomName).to('admin_support_channel').emit('chat:message', payload);
+        io.to(roomName).to('admin_support_channel').emit('chat:session_resolved', { sessionId: session.id.toString() });
       }
     } else if (status === 'agent_active' || status === 'active') {
       session.status = 'open';
