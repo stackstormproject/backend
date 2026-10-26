@@ -18,8 +18,18 @@ router.post('/:id/reviews', auth, reviewController.createReview);
 router.get('/:slug', productController.getProductBySlug);
 
 // Admin-guarded mutations with automatic cache eviction
-router.post('/', auth, rbac(['admin', 'inventory_manager']), productController.createProduct);
-router.put('/:id', auth, rbac(['admin', 'inventory_manager']), productController.updateProduct);
-router.delete('/:id', auth, rbac(['admin']), productController.deleteProduct);
+router.post(
+  '/',
+  auth,
+  rbac(['admin', 'super_admin', 'inventory_manager']),
+  productController.createProduct
+);
+router.put(
+  '/:id',
+  auth,
+  rbac(['admin', 'super_admin', 'inventory_manager']),
+  productController.updateProduct
+);
+router.delete('/:id', auth, rbac(['admin', 'super_admin']), productController.deleteProduct);
 
 module.exports = router;
