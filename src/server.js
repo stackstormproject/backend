@@ -20,6 +20,7 @@ const server = http.createServer(app);
 
 // Mount real-time Socket.IO chat and support gateway
 const io = initSocketServer(server);
+app.set('io', io);
 
 server.listen(port, async () => {
   logger.info('API listening', { port });
