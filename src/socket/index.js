@@ -254,13 +254,19 @@ function initSocketServer(httpServer, options = {}) {
         const { sessionId, subject } = payload;
         let session;
 
+        const effectiveCustomerId =
+          socket.user?.userId || socket.user?.id || payload.customerId || null;
+
         if (sessionId) {
           session = await ChatSession.findByPk(sessionId);
           if (!session) {
             session = await ChatSession.create({
-              customerId: socket.user?.userId || socket.user?.id || null,
+              customerId: effectiveCustomerId,
               status: 'open',
             });
+          } else if (!session.customerId && effectiveCustomerId) {
+            session.customerId = effectiveCustomerId;
+            await session.save();
           }
 
           // If support agent is joining, claim the session
