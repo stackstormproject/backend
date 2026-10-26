@@ -1,5 +1,5 @@
 /* eslint-disable */
-const { Category, Product, ProductVariant } = require('../models');
+const { Category, Product, ProductVariant, sequelize } = require('../models');
 
 async function seedCategoriesAndProducts() {
   const rootCategories = [
@@ -299,6 +299,23 @@ async function seedCategoriesAndProducts() {
     } else {
       await existing.update(prod);
     }
+  }
+
+  // Ensure PostgreSQL primary key sequences match the max seeded IDs
+  if (
+    sequelize &&
+    typeof sequelize.getDialect === 'function' &&
+    sequelize.getDialect() === 'postgres'
+  ) {
+    await sequelize.query(
+      "SELECT setval('categories_id_seq', COALESCE((SELECT MAX(id) FROM categories), 1))"
+    );
+    await sequelize.query(
+      "SELECT setval('products_id_seq', COALESCE((SELECT MAX(id) FROM products), 1))"
+    );
+    await sequelize.query(
+      "SELECT setval('product_variants_id_seq', COALESCE((SELECT MAX(id) FROM product_variants), 1))"
+    );
   }
 
   console.log('Categories & Products successfully seeded!');
