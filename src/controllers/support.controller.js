@@ -41,7 +41,11 @@ const getSupportSessions = async (req, res, next) => {
       limit: 50,
     });
 
-    const sessions = rawSessions.map((session) => {
+    const activeSessions = rawSessions.filter(
+      (s) => (s.messages && s.messages.length > 0) || s.agentId || s.status === 'waiting'
+    );
+
+    const sessions = activeSessions.map((session) => {
       const { customer } = session;
       const sortedMessages = (session.messages || []).sort(
         (a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime()
@@ -49,7 +53,7 @@ const getSupportSessions = async (req, res, next) => {
 
       const firstCustomerMsg = sortedMessages.find((m) => m.senderType === 'customer');
       const topicSnippet = firstCustomerMsg?.message
-        ? firstCustomerMsg.message.slice(0, 40)
+        ? firstCustomerMsg.message.slice(0, 45)
         : 'Customer Storefront Inquiry';
 
       let status = 'pending';
@@ -106,9 +110,31 @@ const updateSessionStatus = async (req, res, next) => {
 
     if (status === 'resolved' || status === 'closed') {
       session.status = 'closed';
+      const io = req.app.get('io');
+      if (io) {
+        const resolveMsg = await ChatMessage.create({
+          chatSessionId: session.id,
+          senderType: 'agent',
+          message:
+            'This support inquiry has been resolved. Thank you for choosing Dickwella Fashion Corner!',
+        });
+        const roomName = `chat_session_${session.id}`;
+        const payload = {
+          id: `msg-${resolveMsg.id}`,
+          sessionId: session.id.toString(),
+          senderRole: 'support_agent',
+          senderName: 'Support Desk',
+          message: resolveMsg.message,
+          createdAt: resolveMsg.createdAt.toISOString(),
+        };
+        io.to(roomName).emit('chat:message', payload);
+        io.to(roomName).emit('chat:session_resolved', { sessionId: session.id.toString() });
+        io.to('admin_support_channel').emit('chat:message', payload);
+      }
     } else if (status === 'agent_active' || status === 'active') {
       session.status = 'open';
-      if (req.user?.id) session.agentId = req.user.id;
+      const agentId = req.user?.userId || req.user?.id || 1;
+      session.agentId = agentId;
     } else if (status === 'pending' || status === 'waiting') {
       session.status = 'waiting';
     }
