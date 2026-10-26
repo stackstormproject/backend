@@ -120,7 +120,7 @@ const getAnalyticsOverview = async () => {
  * @param {number} [days=30]
  * @returns {Promise<object>}
  */
-const getSalesTrend = async (days = 30) => {
+const getSalesTrend = async (_days = 30) => {
   const orders = await Order.findAll({
     attributes: ['id', 'status', 'totalAmount', 'orderDate'],
     where: {
@@ -134,7 +134,7 @@ const getSalesTrend = async (days = 30) => {
   // Daily (past 7 days)
   const daily = [];
   const daysOfWeek = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-  for (let i = 6; i >= 0; i--) {
+  for (let i = 6; i >= 0; i -= 1) {
     const d = new Date(now);
     d.setDate(d.getDate() - i);
     const dateStr = d.toISOString().split('T')[0];
@@ -156,7 +156,7 @@ const getSalesTrend = async (days = 30) => {
 
   // Weekly (past 4 weeks)
   const weekly = [];
-  for (let w = 3; w >= 0; w--) {
+  for (let w = 3; w >= 0; w -= 1) {
     const start = new Date(now);
     start.setDate(start.getDate() - (w + 1) * 7);
     const end = new Date(now);
@@ -193,7 +193,7 @@ const getSalesTrend = async (days = 30) => {
     'Nov',
     'Dec',
   ];
-  for (let m = 5; m >= 0; m--) {
+  for (let m = 5; m >= 0; m -= 1) {
     const d = new Date(now.getFullYear(), now.getMonth() - m, 1);
     const nextD = new Date(now.getFullYear(), now.getMonth() - m + 1, 1);
     const label = monthNames[d.getMonth()];
