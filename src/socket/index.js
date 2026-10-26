@@ -403,15 +403,23 @@ function initSocketServer(httpServer, options = {}) {
 
         const senderRole = isMessageFromAgent ? 'support_agent' : 'customer';
         const senderType = isMessageFromAgent ? 'agent' : 'customer';
-        const senderName = isMessageFromAgent
-          ? (socket.user?.name && socket.user.name !== 'Guest' ? socket.user.name : payload.senderName || 'Alex (Support Agent)')
-          : (socket.user?.name && socket.user.name !== 'Guest' ? socket.user.name : payload.senderName || 'Customer');
+
+        let { senderName } = payload;
+        if (socket.user?.name && socket.user.name !== 'Guest') {
+          senderName = socket.user.name;
+        } else if (!senderName) {
+          senderName = isMessageFromAgent ? 'Alex (Support Agent)' : 'Customer';
+        }
+
+        const senderId = isMessageFromAgent
+          ? socket.user?.id || 1
+          : socket.user?.id || socket.user?.userId || null;
 
         // Persist message in PostgreSQL
         const chatMsg = await ChatMessage.create({
           chatSessionId: sessionId,
           senderType,
-          senderId: isMessageFromAgent ? (socket.user?.id || 1) : (socket.user?.id || socket.user?.userId || null),
+          senderId,
           message: message.trim(),
         });
 
