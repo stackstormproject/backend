@@ -32,6 +32,9 @@ function errorHandler(err, req, res, next) {
   } else if (err.name === 'SequelizeUniqueConstraintError') {
     status = 409;
     body = { error: 'DUPLICATE_ENTRY', message: 'A record with this value already exists.' };
+    if (err.errors && Array.isArray(err.errors) && err.errors.length > 0) {
+      body.details = err.errors.map((e) => ({ field: e.path, message: e.message }));
+    }
   } else if (err.type === 'entity.parse.failed') {
     status = 400;
     body = { error: 'INVALID_JSON', message: 'Request body is not valid JSON.' };
