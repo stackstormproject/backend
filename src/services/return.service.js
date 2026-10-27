@@ -175,6 +175,7 @@ const getCustomerReturns = async (customerId, options = {}) => {
     reason: r.reason,
     status: r.status,
     refund_amount: Number(r.refundAmount || 0),
+    admin_note: r.adminNote || null,
     product_title: r.orderItem?.variant?.product?.name || 'Garment Item',
     sku: r.orderItem?.variant?.sku || '',
     exchange_variant: r.exchangeVariant || null,
