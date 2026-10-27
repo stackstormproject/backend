@@ -1,5 +1,5 @@
 const http = require('http');
-const jwt = require('jsonwebtoken');
+const { generateAccessToken } = require('../../../src/utils/tokenGenerator');
 const { io: Client } = require('socket.io-client');
 const { initSocketServer } = require('../../../src/socket');
 const { ChatSession, ChatMessage } = require('../../../src/models');
@@ -66,10 +66,7 @@ describe('STORM-BE-CHAT: Socket.IO Real-Time Chat Gateway', () => {
   });
 
   it('authenticates admin token and joins admin_support_channel', (done) => {
-    const adminToken = jwt.sign(
-      { id: 99, role: 'support_agent', name: 'Agent Smith' },
-      JWT_SECRET
-    );
+    const adminToken = generateAccessToken(99, 'support_agent');
 
     adminClientSocket = Client(`http://localhost:${serverPort}`, {
       transports: ['websocket'],
@@ -93,15 +90,9 @@ describe('STORM-BE-CHAT: Socket.IO Real-Time Chat Gateway', () => {
     ChatSession.findOne.mockResolvedValue(null);
     ChatSession.create.mockResolvedValue(mockSession);
 
-    const customerToken = jwt.sign(
-      { id: 42, role: 'customer', name: 'Alice Customer' },
-      JWT_SECRET
-    );
+    const customerToken = generateAccessToken(42, 'customer');
 
-    const adminToken = jwt.sign(
-      { id: 99, role: 'support_agent', name: 'Agent Smith' },
-      JWT_SECRET
-    );
+    const adminToken = generateAccessToken(99, 'support_agent');
 
     adminClientSocket = Client(`http://localhost:${serverPort}`, {
       transports: ['websocket'],
@@ -124,14 +115,10 @@ describe('STORM-BE-CHAT: Socket.IO Real-Time Chat Gateway', () => {
       });
 
       clientSocket.on('connect', () => {
-        clientSocket.emit(
-          'chat:join',
-          { subject: 'Need help with return' },
-          (response) => {
-            expect(response.success).toBe(true);
-            expect(response.sessionId).toBe(101);
-          }
-        );
+        clientSocket.emit('chat:join', { subject: 'Need help with return' }, (response) => {
+          expect(response.success).toBe(true);
+          expect(response.sessionId).toBe(101);
+        });
       });
     });
   });
@@ -204,5 +191,20 @@ describe('STORM-BE-CHAT: Socket.IO Real-Time Chat Gateway', () => {
 
     client1.on('connect', onConnect);
     client2.on('connect', onConnect);
+  });
+
+  it('treats the removed literal admin token as a guest', (done) => {
+    const intruder = Client(`http://localhost:${serverPort}`, {
+      transports: ['websocket'],
+      auth: { token: 'mock-admin-token' },
+    });
+    intruder.on('connect', () => {
+      const sockets = [...io.of('/').sockets.values()];
+      const server = sockets.find((sk) => sk.id === intruder.id);
+      expect(server.user.role).toBe('guest');
+      expect(server.rooms.has('admin_support_channel')).toBe(false);
+      intruder.disconnect();
+      done();
+    });
   });
 });

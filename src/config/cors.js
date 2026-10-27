@@ -36,7 +36,15 @@ const corsOptions = {
   },
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-  allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'Accept'],
+  allowedHeaders: [
+    'Content-Type',
+    'Authorization',
+    'X-Requested-With',
+    'Accept',
+    'X-Session-Token',
+    'X-Guest-Token',
+  ],
 };
 
 module.exports = corsOptions;
+module.exports.isOriginAllowed = isOriginAllowed;
