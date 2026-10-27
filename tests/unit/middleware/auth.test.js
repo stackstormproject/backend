@@ -136,3 +136,23 @@ describe('toRequestUser', () => {
     expect(toRequestUser({ sub: 9 }).id).toBe(9);
   });
 });
+
+describe('removed test tokens (#122)', () => {
+  const { auth } = require('../../../src/middleware/auth');
+
+  it.each(['mock-admin-token', 'jwt-admin-token-xyz'])(
+    'should reject the literal token %s outside production',
+    (token) => {
+      const previous = process.env.NODE_ENV;
+      process.env.NODE_ENV = 'development';
+      const req = { headers: { authorization: `Bearer ${token}` } };
+      const next = jest.fn();
+
+      auth(req, {}, next);
+
+      expect(req.user).toBeUndefined();
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 401 }));
+      process.env.NODE_ENV = previous;
+    }
+  );
+});
