@@ -5,6 +5,7 @@ const adminOrderController = require('../controllers/adminOrder.controller');
 const adminInventoryController = require('../controllers/adminInventory.controller');
 const adminProductController = require('../controllers/adminProduct.controller');
 const adminReturnController = require('../controllers/adminReturn.controller');
+const adminCustomerController = require('../controllers/adminCustomer.controller');
 const { auth } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
 const { MANAGER_ROLES, SUPPORT_ROLES } = require('../config/constants');
@@ -38,6 +39,10 @@ router.get('/returns/:id', managers, adminReturnController.detail);
 router.post('/returns/:id/approve', managers, adminReturnController.approve);
 router.post('/returns/:id/reject', managers, adminReturnController.reject);
 router.post('/returns/:id/receive', managers, adminReturnController.receive);
+
+router.get('/customers', managers, adminCustomerController.list);
+router.get('/customers/:id', managers, adminCustomerController.detail);
+router.post('/customers/:id/loyalty-adjustments', managers, adminCustomerController.adjustPoints);
 
 router.get('/inventory', managers, adminInventoryController.list);
 router.post('/inventory/:variantId/adjust', managers, adminInventoryController.adjust);
