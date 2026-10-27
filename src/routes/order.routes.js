@@ -11,6 +11,4 @@ router.get('/:id/track', optionalAuth, orderController.trackOrder);
 router.get('/:id/tracking', optionalAuth, orderController.trackOrder);
 router.get('/:id', optionalAuth, orderController.getOrderById);
 
-router.post('/:id/finalize', auth, orderController.finalizeOrder);
-
 module.exports = router;

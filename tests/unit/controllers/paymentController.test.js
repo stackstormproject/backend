@@ -1,15 +1,17 @@
 jest.mock('../../../src/services/stripe.service', () => ({
   createPaymentIntent: jest.fn(),
+  confirmOrderPayment: jest.fn(),
   constructWebhookEvent: jest.fn(),
   handleWebhookEvent: jest.fn(),
 }));
 
 const stripeService = require('../../../src/services/stripe.service');
 const {
+  callerOf,
   createPaymentIntent,
+  confirmPayment,
   handleWebhook,
 } = require('../../../src/controllers/payment.controller');
-const ApiError = require('../../../src/utils/ApiError');
 
 const mockRes = () => {
   const res = {};
@@ -18,150 +20,143 @@ const mockRes = () => {
   return res;
 };
 
+const mockReq = ({ body = {}, headers = {}, user = null } = {}) => ({
+  body,
+  user,
+  headers,
+  get: (name) => headers[name.toLowerCase()],
+});
+
 describe('payment controller', () => {
   beforeEach(() => {
     jest.clearAllMocks();
   });
 
-  describe('createPaymentIntent', () => {
-    it('should call next with badRequest if order_id is missing', async () => {
-      const req = { body: {} };
-      const res = mockRes();
-      const next = jest.fn();
-
-      await createPaymentIntent(req, res, next);
-
-      expect(next).toHaveBeenCalledWith(expect.any(ApiError));
-      expect(next.mock.calls[0][0].statusCode).toBe(400);
-    });
-
-    it('should create payment intent and return 200 with result', async () => {
-      const mockResult = { clientSecret: 'pi_secret_123', paymentIntentId: 'pi_123' };
-      stripeService.createPaymentIntent.mockResolvedValue(mockResult);
-
-      const req = { body: { order_id: 'ord_123' } };
-      const res = mockRes();
-      const next = jest.fn();
-
-      await createPaymentIntent(req, res, next);
-
-      expect(stripeService.createPaymentIntent).toHaveBeenCalledWith('ord_123');
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          success: true,
-          data: mockResult,
-        })
+  describe('callerOf', () => {
+    it('should read the customer id from the token and the guest token from the header', () => {
+      const caller = callerOf(
+        mockReq({ user: { userId: 4 }, headers: { 'x-guest-token': 'tok' } })
       );
-      expect(next).not.toHaveBeenCalled();
+
+      expect(caller).toEqual({ customerId: 4, guestToken: 'tok' });
     });
 
-    it('should support orderId camelCase alias', async () => {
-      const mockResult = { clientSecret: 'pi_secret_456' };
-      stripeService.createPaymentIntent.mockResolvedValue(mockResult);
+    it('should fall back to a guest token in the body', () => {
+      expect(callerOf(mockReq({ body: { guest_token: 'b' } }))).toEqual({
+        customerId: null,
+        guestToken: 'b',
+      });
+    });
+  });
 
-      const req = { body: { orderId: 'ord_456' } };
-      const res = mockRes();
+  describe('createPaymentIntent', () => {
+    it('should call next with 400 given no order id', async () => {
       const next = jest.fn();
 
-      await createPaymentIntent(req, res, next);
+      await createPaymentIntent(mockReq(), mockRes(), next);
 
-      expect(stripeService.createPaymentIntent).toHaveBeenCalledWith('ord_456');
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
+    });
+
+    it('should pass the caller identity to the service and return 200', async () => {
+      stripeService.createPaymentIntent.mockResolvedValue({ clientSecret: 's' });
+      const res = mockRes();
+
+      await createPaymentIntent(
+        mockReq({ body: { orderId: 10 }, user: { userId: 4 } }),
+        res,
+        jest.fn()
+      );
+
+      expect(stripeService.createPaymentIntent).toHaveBeenCalledWith(10, {
+        customerId: 4,
+        guestToken: null,
+      });
       expect(res.status).toHaveBeenCalledWith(200);
     });
 
-    it('should pass service errors to next', async () => {
-      const err = new Error('Database down');
+    it('should forward service errors', async () => {
+      const err = new Error('boom');
       stripeService.createPaymentIntent.mockRejectedValue(err);
-
-      const req = { body: { order_id: 'ord_fail' } };
-      const res = mockRes();
       const next = jest.fn();
 
-      await createPaymentIntent(req, res, next);
+      await createPaymentIntent(mockReq({ body: { order_id: 1 } }), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(err);
+    });
+  });
+
+  describe('confirmPayment', () => {
+    it('should call next with 400 given no order id', async () => {
+      const next = jest.fn();
+
+      await confirmPayment(mockReq(), mockRes(), next);
+
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
+    });
+
+    it('should confirm with the supplied intent id', async () => {
+      stripeService.confirmOrderPayment.mockResolvedValue({ orderId: 10, status: 'processing' });
+      const res = mockRes();
+
+      await confirmPayment(
+        mockReq({ body: { order_id: 10, payment_intent_id: 'pi_1' }, user: { userId: 4 } }),
+        res,
+        jest.fn()
+      );
+
+      expect(stripeService.confirmOrderPayment).toHaveBeenCalledWith(
+        10,
+        { customerId: 4, guestToken: null },
+        'pi_1'
+      );
+      expect(res.status).toHaveBeenCalledWith(200);
+    });
+
+    it('should forward service errors', async () => {
+      const err = new Error('402');
+      stripeService.confirmOrderPayment.mockRejectedValue(err);
+      const next = jest.fn();
+
+      await confirmPayment(mockReq({ body: { order_id: 1 } }), mockRes(), next);
 
       expect(next).toHaveBeenCalledWith(err);
     });
   });
 
   describe('handleWebhook', () => {
-    it('should pass error to next if stripe-signature header is missing', async () => {
-      const req = { headers: {}, body: {} };
-      const res = mockRes();
+    it('should call next with 400 given no signature header', async () => {
       const next = jest.fn();
 
-      await handleWebhook(req, res, next);
+      await handleWebhook(mockReq({ body: Buffer.from('{}') }), mockRes(), next);
 
-      expect(next).toHaveBeenCalledWith(expect.any(ApiError));
-      expect(next.mock.calls[0][0].statusCode).toBe(400);
+      expect(next).toHaveBeenCalledWith(expect.objectContaining({ statusCode: 400 }));
     });
 
-    it('should verify signature and process webhook successfully', async () => {
-      const mockEvent = { id: 'evt_1', type: 'payment_intent.succeeded' };
-      const mockResult = { success: true, order_id: 'ord_1', status: 'paid' };
-
-      stripeService.constructWebhookEvent.mockReturnValue(mockEvent);
-      stripeService.handleWebhookEvent.mockResolvedValue(mockResult);
-
-      const req = {
-        headers: { 'stripe-signature': 'sig_test_123' },
-        rawBody: Buffer.from(JSON.stringify({ some: 'data' })),
-      };
+    it('should verify the raw body and acknowledge the event', async () => {
+      const raw = Buffer.from('{"id":"evt"}');
+      stripeService.constructWebhookEvent.mockReturnValue({ type: 'payment_intent.succeeded' });
+      stripeService.handleWebhookEvent.mockResolvedValue({ processed: true });
       const res = mockRes();
-      const next = jest.fn();
+      const req = mockReq({ body: raw });
+      req.headers['stripe-signature'] = 'sig';
 
-      await handleWebhook(req, res, next);
+      await handleWebhook(req, res, jest.fn());
 
-      expect(stripeService.constructWebhookEvent).toHaveBeenCalledWith(
-        req.rawBody,
-        'sig_test_123'
-      );
-      expect(stripeService.handleWebhookEvent).toHaveBeenCalledWith(mockEvent);
-      expect(res.status).toHaveBeenCalledWith(200);
-      expect(res.json).toHaveBeenCalledWith(
-        expect.objectContaining({
-          received: true,
-          success: true,
-          status: 'paid',
-        })
-      );
+      expect(stripeService.constructWebhookEvent).toHaveBeenCalledWith(raw, 'sig');
+      expect(res.json).toHaveBeenCalledWith({ received: true, processed: true });
     });
 
-    it('should convert object payload to Buffer if rawBody is not present', async () => {
-      const mockEvent = { id: 'evt_2', type: 'payment_intent.succeeded' };
-      stripeService.constructWebhookEvent.mockReturnValue(mockEvent);
-      stripeService.handleWebhookEvent.mockResolvedValue({ success: true });
-
-      const req = {
-        headers: { 'stripe-signature': 'sig_test_456' },
-        body: { id: 'test' },
-      };
-      const res = mockRes();
-      const next = jest.fn();
-
-      await handleWebhook(req, res, next);
-
-      expect(stripeService.constructWebhookEvent).toHaveBeenCalledWith(
-        expect.any(Buffer),
-        'sig_test_456'
-      );
-      expect(res.status).toHaveBeenCalledWith(200);
-    });
-
-    it('should forward signature verification error to next', async () => {
-      const err = new Error('Invalid signature');
+    it('should forward verification errors', async () => {
+      const err = new Error('bad sig');
       stripeService.constructWebhookEvent.mockImplementation(() => {
         throw err;
       });
-
-      const req = {
-        headers: { 'stripe-signature': 'bad_sig' },
-        body: {},
-      };
-      const res = mockRes();
       const next = jest.fn();
+      const req = mockReq({ body: Buffer.from('{}') });
+      req.headers['stripe-signature'] = 'sig';
 
-      await handleWebhook(req, res, next);
+      await handleWebhook(req, mockRes(), next);
 
       expect(next).toHaveBeenCalledWith(err);
     });

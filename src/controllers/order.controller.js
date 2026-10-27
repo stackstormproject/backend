@@ -54,24 +54,8 @@ const trackOrder = async (req, res, next) => {
   }
 };
 
-/**
- * Finalizes an order upon payment completion.
- * Route: POST /orders/:id/finalize
- */
-const finalizeOrder = async (req, res, next) => {
-  try {
-    const { id } = req.params;
-    const paymentDetails = req.body.payment_details || req.body;
-    const result = await orderService.finalizeOrder(id, paymentDetails);
-    return successResponse(res, result, 'Order finalized successfully', 200);
-  } catch (error) {
-    return next(error);
-  }
-};
-
 module.exports = {
   getOrderById,
   getMyOrders,
   trackOrder,
-  finalizeOrder,
 };
