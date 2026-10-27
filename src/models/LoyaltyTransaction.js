@@ -20,11 +20,12 @@ module.exports = (sequelize) => {
       },
       points: { type: DataTypes.INTEGER, allowNull: false },
       transactionType: {
-        type: DataTypes.ENUM('earned', 'redeemed', 'expired'),
+        type: DataTypes.ENUM('earned', 'redeemed', 'expired', 'adjusted'),
         allowNull: false,
         field: 'transaction_type',
       },
       description: { type: DataTypes.STRING, allowNull: true },
+      adminId: { type: DataTypes.INTEGER, allowNull: true, field: 'admin_id' },
       expiresAt: {
         type: DataTypes.DATE,
         allowNull: true,
