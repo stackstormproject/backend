@@ -33,9 +33,9 @@ describe('returnService', () => {
 
   describe('requestReturn', () => {
     it('throws validation error if reason is missing', async () => {
-      await expect(
-        requestReturn({ customerId: 4, orderItemId: 1, reason: '' })
-      ).rejects.toThrow(ApiError);
+      await expect(requestReturn({ customerId: 4, orderItemId: 1, reason: '' })).rejects.toThrow(
+        ApiError
+      );
     });
 
     it('throws forbidden if order does not belong to customer', async () => {
@@ -54,7 +54,7 @@ describe('returnService', () => {
         id: 1,
         orderId: 10,
         subtotal: 4850.0,
-        order: { customerId: 4 },
+        order: { customerId: 4, status: 'delivered', deliveryDate: new Date() },
       });
       Return.findOne.mockResolvedValue(null);
       Return.create.mockResolvedValue({
@@ -86,7 +86,7 @@ describe('returnService', () => {
         id: 1,
         orderId: 10,
         subtotal: 4850.0,
-        order: { customerId: 4 },
+        order: { customerId: 4, status: 'delivered', deliveryDate: new Date() },
       });
       Return.findOne.mockResolvedValue(null);
       ProductVariant.findByPk.mockResolvedValue(null);
@@ -116,7 +116,7 @@ describe('returnService', () => {
             reason: 'Too large',
             status: 'requested',
             refundAmount: 4850.0,
-            orderItem: { variant: { sku: 'BATIK-M', product: { title: 'Shirt' } } },
+            orderItem: { variant: { sku: 'BATIK-M', product: { name: 'Shirt' } } },
           },
         ],
       });
@@ -124,6 +124,38 @@ describe('returnService', () => {
       const res = await getCustomerReturns(4, { page: 1, limit: 10 });
       expect(res.returns).toHaveLength(1);
       expect(res.returns[0].product_title).toBe('Shirt');
+    });
+  });
+
+  describe('assertReturnEligible', () => {
+    const { assertReturnEligible } = require('../../../src/services/return.service');
+    const now = new Date('2026-11-30T00:00:00Z');
+    const daysAgo = (n) => new Date(now.getTime() - n * 24 * 60 * 60 * 1000);
+
+    it('should reject an order that is not delivered', () => {
+      expect(() => assertReturnEligible({ status: 'shipped' }, null, now)).toThrow(/delivered/);
+    });
+
+    it('should reject a final-sale product', () => {
+      expect(() =>
+        assertReturnEligible(
+          { status: 'delivered', deliveryDate: daysAgo(1) },
+          { isFinalSale: true },
+          now
+        )
+      ).toThrow(/Final-sale/);
+    });
+
+    it('should accept a delivery exactly 30 days ago', () => {
+      expect(() =>
+        assertReturnEligible({ status: 'delivered', deliveryDate: daysAgo(30) }, {}, now)
+      ).not.toThrow();
+    });
+
+    it('should reject a delivery 31 days ago', () => {
+      expect(() =>
+        assertReturnEligible({ status: 'delivered', deliveryDate: daysAgo(31) }, {}, now)
+      ).toThrow(/30-day/);
     });
   });
 });
