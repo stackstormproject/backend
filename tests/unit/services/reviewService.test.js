@@ -44,11 +44,7 @@ describe('reviewService', () => {
     });
 
     it('calculates average rating and breakdown', async () => {
-      Review.findAll.mockResolvedValue([
-        { rating: 5 },
-        { rating: 4 },
-        { rating: 5 },
-      ]);
+      Review.findAll.mockResolvedValue([{ rating: 5 }, { rating: 4 }, { rating: 5 }]);
 
       const stats = await getProductRatingStats(1);
       expect(stats.average_rating).toBe(4.7);
@@ -60,18 +56,14 @@ describe('reviewService', () => {
 
   describe('checkVerifiedBuyer', () => {
     it('returns true if customer previously purchased product', async () => {
-      Order.findAll.mockResolvedValue([
-        { items: [{ id: 1 }] },
-      ]);
+      Order.findAll.mockResolvedValue([{ items: [{ id: 1 }] }]);
 
       const verified = await checkVerifiedBuyer(4, 1);
       expect(verified).toBe(true);
     });
 
     it('returns false if customer has not purchased product', async () => {
-      Order.findAll.mockResolvedValue([
-        { items: [] },
-      ]);
+      Order.findAll.mockResolvedValue([{ items: [] }]);
 
       const verified = await checkVerifiedBuyer(4, 1);
       expect(verified).toBe(false);
@@ -80,20 +72,42 @@ describe('reviewService', () => {
 
   describe('createReview', () => {
     it('throws validation error for invalid rating', async () => {
-      await expect(
-        createReview({ customerId: 4, productId: 1, rating: 6 })
-      ).rejects.toThrow(ApiError);
+      await expect(createReview({ customerId: 4, productId: 1, rating: 6 })).rejects.toThrow(
+        ApiError
+      );
 
-      await expect(
-        createReview({ customerId: 4, productId: 1, rating: 0 })
-      ).rejects.toThrow(ApiError);
+      await expect(createReview({ customerId: 4, productId: 1, rating: 0 })).rejects.toThrow(
+        ApiError
+      );
     });
 
     it('throws conflict if customer already submitted review', async () => {
       Review.findOne.mockResolvedValue({ id: 99 });
+      await expect(createReview({ customerId: 4, productId: 1, rating: 5 })).rejects.toThrow(
+        ApiError
+      );
+    });
+
+    it('should return 403 given the customer never purchased the product', async () => {
+      Review.findOne.mockResolvedValue(null);
+      Order.findAll.mockResolvedValue([]);
+
       await expect(
-        createReview({ customerId: 4, productId: 1, rating: 5 })
-      ).rejects.toThrow(ApiError);
+        createReview({ customerId: 4, productId: 1, rating: 5, comment: 'Nice' })
+      ).rejects.toMatchObject({ statusCode: 403 });
+      expect(Review.create).not.toHaveBeenCalled();
+    });
+
+    it('should only count paid orders as purchases', async () => {
+      Order.findAll.mockResolvedValue([]);
+
+      await checkVerifiedBuyer(4, 1);
+
+      expect(Order.findAll).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { customerId: 4, status: ['confirmed', 'processing', 'shipped', 'delivered'] },
+        })
+      );
     });
 
     it('creates review and persists attached images', async () => {
