@@ -39,6 +39,9 @@ const getProductRatingStats = async (productId) => {
   };
 };
 
+// Orders that count as a purchase: paid and not cancelled or returned.
+const PURCHASED_STATUSES = ['confirmed', 'processing', 'shipped', 'delivered'];
+
 /**
  * Checks if customer is a verified buyer of this product.
  * (Has at least one confirmed or delivered order containing a variant of this product).
@@ -51,7 +54,7 @@ const checkVerifiedBuyer = async (customerId, productId) => {
   if (!customerId) return false;
 
   const orders = await Order.findAll({
-    where: { customerId },
+    where: { customerId, status: PURCHASED_STATUSES },
     include: [
       {
         model: OrderItem,
@@ -100,6 +103,10 @@ const createReview = async ({ customerId, productId, rating, comment, images = [
   }
 
   const isVerified = await checkVerifiedBuyer(customerId, productId);
+  // SRS business rule: only customers who purchased the product may review it.
+  if (!isVerified) {
+    throw ApiError.forbidden('Only customers who purchased this product can review it');
+  }
 
   const review = await Review.create({
     customerId,
