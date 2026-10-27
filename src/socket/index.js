@@ -6,7 +6,30 @@ const { isOriginAllowed } = require('../config/cors');
 const logger = require('../config/logger');
 
 const GUEST_USER = Object.freeze({ id: null, userId: null, role: 'guest', name: 'Guest' });
-const { ChatSession, ChatMessage, Order, Customer } = require('../models');
+const AGENT_ROLES = ['admin', 'super_admin', 'support_agent'];
+const { ChatSession, ChatMessage, Order, Customer, Admin } = require('../models');
+
+/** Refs #139: the agent's real name, so customers see who is helping them. */
+const loadAgentName = async (adminId) => {
+  try {
+    const admin = Admin && adminId ? await Admin.findByPk(adminId) : null;
+    return admin?.name || 'Support agent';
+  } catch {
+    return 'Support agent';
+  }
+};
+
+/**
+ * Refs #139: who may join a session room. Agents may join any session; a signed-in
+ * customer only their own (or an unclaimed guest session they started before signing in);
+ * a guest only a guest session.
+ */
+const canJoinSession = (session, user, isAgent) => {
+  if (isAgent) return true;
+  const userId = user?.userId || user?.id || null;
+  if (!session.customerId) return true;
+  return Boolean(userId) && Number(session.customerId) === Number(userId);
+};
 
 /**
  * Generates an automated Virtual Assistant response for storefront inquiries
@@ -197,8 +220,8 @@ function initSocketServer(httpServer, options = {}) {
   });
 
   io.on('connection', (socket) => {
-    const isAgent =
-      socket.user && ['admin', 'super_admin', 'support_agent'].includes(socket.user.role);
+    // Refs #139: agent status comes from the verified JWT role only, never from the payload.
+    const isAgent = Boolean(socket.user && AGENT_ROLES.includes(socket.user.role));
 
     logger.info('[SOCKET] Client connected', {
       socketId: socket.id,
@@ -224,43 +247,38 @@ function initSocketServer(httpServer, options = {}) {
         const { sessionId, subject } = payload;
         let session;
 
-        const effectiveCustomerId =
-          socket.user?.userId || socket.user?.id || payload.customerId || null;
+        const effectiveCustomerId = socket.user?.userId || socket.user?.id || null;
 
         if (sessionId) {
           session = await ChatSession.findByPk(sessionId);
+          if (!session && isAgent) {
+            const error = { message: 'Chat session not found' };
+            socket.emit('chat:error', error);
+            if (typeof callback === 'function') callback({ success: false, error });
+            return;
+          }
           if (!session) {
             session = await ChatSession.create({
               customerId: effectiveCustomerId,
               status: 'open',
             });
-          } else if (!session.customerId && effectiveCustomerId) {
+          } else if (!canJoinSession(session, socket.user, isAgent)) {
+            const error = { message: 'You cannot join this chat session' };
+            socket.emit('chat:error', error);
+            if (typeof callback === 'function') callback({ success: false, error });
+            return;
+          } else if (!isAgent && !session.customerId && effectiveCustomerId) {
             session.customerId = effectiveCustomerId;
             await session.save();
           }
 
-          const isAgentJoining =
-            isAgent ||
-            socket.isAgent ||
-            payload.isAgent === true ||
-            payload.role === 'support_agent' ||
-            payload.senderRole === 'support_agent';
-
-          if (isAgentJoining) {
-            socket.isAgent = true;
-            socket.join('admin_support_channel');
-          }
-
           // If support agent is joining, claim the session
-          if (isAgentJoining && !session.agentId) {
+          if (isAgent && !session.agentId) {
             session.agentId = socket.user?.userId || socket.user?.id || 1;
             session.status = 'open';
             await session.save();
 
-            const agentName =
-              socket.user?.name && socket.user.name !== 'Guest'
-                ? socket.user.name
-                : payload.senderName || 'Alex (Support Agent)';
+            const agentName = await loadAgentName(session.agentId);
             const joinMsg = await ChatMessage.create({
               chatSessionId: session.id,
               senderType: 'agent',
@@ -354,36 +372,20 @@ function initSocketServer(httpServer, options = {}) {
           return;
         }
 
-        const isMessageFromAgent = Boolean(
-          isAgent ||
-          socket.isAgent ||
-          (socket.rooms && socket.rooms.has('admin_support_channel')) ||
-          payload.isAgent === true ||
-          payload.senderRole === 'support_agent' ||
-          payload.senderRole === 'agent' ||
-          payload.senderType === 'agent' ||
-          payload.sender === 'agent' ||
-          payload.role === 'support_agent'
-        );
-
-        if (isMessageFromAgent && !socket.isAgent) {
-          socket.isAgent = true;
-          socket.join('admin_support_channel');
+        const roomName = `chat_session_${sessionId}`;
+        // Refs #139: customers may only post into a session room they joined; the sender's
+        // role and name come from the verified token, never from the payload.
+        if (!isAgent && !socket.rooms.has(roomName)) {
+          const error = { message: 'Join the chat session before sending messages' };
+          socket.emit('chat:error', error);
+          if (typeof callback === 'function') callback({ success: false, error });
+          return;
         }
-
+        const isMessageFromAgent = isAgent;
         const senderRole = isMessageFromAgent ? 'support_agent' : 'customer';
         const senderType = isMessageFromAgent ? 'agent' : 'customer';
-
-        let { senderName } = payload;
-        if (socket.user?.name && socket.user.name !== 'Guest') {
-          senderName = socket.user.name;
-        } else if (!senderName) {
-          senderName = isMessageFromAgent ? 'Alex (Support Agent)' : 'Customer';
-        }
-
-        const senderId = isMessageFromAgent
-          ? socket.user?.id || 1
-          : socket.user?.id || socket.user?.userId || null;
+        const senderName = isMessageFromAgent ? await loadAgentName(socket.user.id) : 'Customer';
+        const senderId = socket.user?.id || socket.user?.userId || null;
 
         // Persist message in PostgreSQL
         const chatMsg = await ChatMessage.create({
@@ -407,7 +409,6 @@ function initSocketServer(httpServer, options = {}) {
               : chatMsg.createdAt || new Date().toISOString(),
         };
 
-        const roomName = `chat_session_${sessionId}`;
         // Broadcast to all sockets in session room and admin channel without duplicate delivery
         io.to(roomName).to('admin_support_channel').emit('chat:message', messagePayload);
 
