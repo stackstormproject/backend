@@ -167,9 +167,9 @@ const initiateCheckout = async (checkoutData = {}) => {
     }
 
     const prod = dbVariant.product || {};
-    const unitPrice = dbVariant.price_override
-      ? Number(dbVariant.price_override)
-      : Number(prod.base_price || 0);
+    const rawPrice =
+      dbVariant.price_override ?? dbVariant.additionalPrice ?? prod.price ?? prod.base_price ?? 0;
+    const unitPrice = Number(rawPrice);
     const lineTotal = Number((unitPrice * reqItem.quantity).toFixed(2));
     subtotal += lineTotal;
 
@@ -181,7 +181,7 @@ const initiateCheckout = async (checkoutData = {}) => {
       unit_price: unitPrice,
       subtotal: lineTotal,
       total_price: lineTotal,
-      title: prod.title || 'Apparel Item',
+      title: prod.name || prod.title || 'Apparel Item',
       sku: dbVariant.sku,
       size: dbVariant.size,
       color: dbVariant.color,
