@@ -9,6 +9,36 @@ const logger = require('../config/logger');
  * @param {object} order
  * @returns {string} Unique invoice string
  */
+const PRODUCT_SUMMARY_ATTRIBUTES = ['id', 'name', 'slug', 'price', 'primaryImage', 'isFinalSale'];
+
+/** Maps an order line with its variant and product to the public line shape. */
+const toOrderLine = (item) => ({
+  id: item.id,
+  variant_id: item.productVariantId,
+  quantity: item.quantity,
+  unit_price: Number(item.unitPrice),
+  subtotal: Number(item.subtotal),
+  product_id: item.variant?.product?.id || null,
+  product_title: item.variant?.product?.name || 'Garment Item',
+  product_slug: item.variant?.product?.slug || null,
+  primary_image: item.variant?.product?.primaryImage || null,
+  is_final_sale: Boolean(item.variant?.product?.isFinalSale),
+  sku: item.variant?.sku || '',
+  size: item.variant?.size || null,
+  color: item.variant?.color || null,
+});
+
+/**
+ * A registered customer may read only their own orders; a guest order is readable only with
+ * its guest token. Anything else is reported as "not found" so order ids cannot be probed.
+ */
+const canReadOrder = (order, customerId, guestToken) => {
+  if (order.customerId) {
+    return Boolean(customerId) && Number(order.customerId) === Number(customerId);
+  }
+  return Boolean(guestToken) && order.guestOrderToken === guestToken;
+};
+
 const generateInvoiceNumber = (order) => {
   const date = order.orderDate ? new Date(order.orderDate) : new Date();
   const year = date.getFullYear();
@@ -56,14 +86,7 @@ const getOrderById = async (orderId, customerId = null, guestToken = null) => {
               {
                 model: Product,
                 as: 'product',
-                attributes: [
-                  'id',
-                  ['name', 'title'],
-                  'name',
-                  'slug',
-                  ['price', 'base_price'],
-                  'price',
-                ],
+                attributes: PRODUCT_SUMMARY_ATTRIBUTES,
               },
             ],
           },
@@ -81,14 +104,8 @@ const getOrderById = async (orderId, customerId = null, guestToken = null) => {
     throw ApiError.notFound(`Order with ID '${orderId}' not found`);
   }
 
-  // Ownership verification: If order has customerId and caller provided customerId, must match
-  if (order.customerId && customerId && Number(order.customerId) !== Number(customerId)) {
-    throw ApiError.forbidden('You do not have permission to view this order');
-  }
-
-  // If guest order, verify guest token or email match
-  if (!order.customerId && !customerId && guestToken && order.guestOrderToken !== guestToken) {
-    throw ApiError.forbidden('Invalid guest order token');
+  if (!canReadOrder(order, customerId, guestToken)) {
+    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
   }
 
   const plain = typeof order.toJSON === 'function' ? order.toJSON() : order;
@@ -118,17 +135,7 @@ const getOrderById = async (orderId, customerId = null, guestToken = null) => {
     shipping_address: shippingAddress,
     billing_address: billingAddress,
     customer: plain.customer || null,
-    items: (plain.items || []).map((item) => ({
-      id: item.id,
-      variant_id: item.productVariantId,
-      quantity: item.quantity,
-      unit_price: Number(item.unitPrice),
-      subtotal: Number(item.subtotal),
-      product_title: item.variant?.product?.title || 'Garment Item',
-      sku: item.variant?.sku || '',
-      size: item.variant?.size || null,
-      color: item.variant?.color || null,
-    })),
+    items: (plain.items || []).map(toOrderLine),
     created_at: plain.createdAt || plain.orderDate,
     updated_at: plain.updatedAt || plain.orderDate,
   };
@@ -164,14 +171,7 @@ const getCustomerOrders = async (customerId, options = {}) => {
               {
                 model: Product,
                 as: 'product',
-                attributes: [
-                  'id',
-                  ['name', 'title'],
-                  'name',
-                  'slug',
-                  ['price', 'base_price'],
-                  'price',
-                ],
+                attributes: PRODUCT_SUMMARY_ATTRIBUTES,
               },
             ],
           },
@@ -200,17 +200,7 @@ const getCustomerOrders = async (customerId, options = {}) => {
       tracking_number: plain.trackingNumber,
       shipping_address: parseAddress(plain.shippingAddress),
       items_count: (plain.items || []).reduce((acc, it) => acc + (it.quantity || 1), 0),
-      items: (plain.items || []).map((item) => ({
-        id: item.id,
-        variant_id: item.productVariantId,
-        quantity: item.quantity,
-        unit_price: Number(item.unitPrice),
-        subtotal: Number(item.subtotal),
-        product_title: item.variant?.product?.title || 'Garment Item',
-        sku: item.variant?.sku || '',
-        size: item.variant?.size || null,
-        color: item.variant?.color || null,
-      })),
+      items: (plain.items || []).map(toOrderLine),
       created_at: plain.createdAt || plain.orderDate,
       updated_at: plain.updatedAt || plain.orderDate,
     };
@@ -368,4 +358,6 @@ module.exports = {
   getOrderTracking,
   finalizeOrder,
   generateInvoiceNumber,
+  canReadOrder,
+  toOrderLine,
 };
