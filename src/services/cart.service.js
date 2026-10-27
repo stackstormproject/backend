@@ -1,5 +1,5 @@
 const { UniqueConstraintError } = require('sequelize');
-const { Cart, CartItem, ProductVariant, sequelize } = require('../models');
+const { Cart, CartItem, Product, ProductVariant, sequelize } = require('../models');
 const ApiError = require('../utils/ApiError');
 
 const availableOf = (v) => Math.max(0, (v.stockQuantity ?? 0) - (v.reservedQuantity ?? 0));
@@ -15,14 +15,56 @@ const getOrCreateCart = async (owner, transaction) => {
   }
 };
 
+/**
+ * Shapes one cart row for the storefront: the variant, its product and live availability.
+ * Unit price is the product price plus the variant surcharge, the same rule checkout uses.
+ */
+const toCartLine = (row) => {
+  const plain = row.get({ plain: true });
+  const variant = plain.variant || {};
+  const product = variant.product || {};
+  const unitPrice = Number(product.price || 0) + Number(variant.additionalPrice || 0);
+  return {
+    id: plain.id,
+    variant_id: plain.productVariantId,
+    quantity: plain.quantity,
+    unit_price: Number(unitPrice.toFixed(2)),
+    line_total: Number((unitPrice * plain.quantity).toFixed(2)),
+    available_stock: availableOf(variant),
+    sku: variant.sku || null,
+    size: variant.size || null,
+    color: variant.color || null,
+    product: {
+      id: product.id || null,
+      name: product.name || null,
+      slug: product.slug || null,
+      primary_image: product.primaryImage || null,
+      is_final_sale: Boolean(product.isFinalSale),
+    },
+  };
+};
+
 const getCart = async (owner) => {
   const cart = await Cart.findOne({ where: owner });
   if (!cart) return [];
-  return CartItem.findAll({
+  const rows = await CartItem.findAll({
     where: { cartId: cart.id },
-    include: [{ model: ProductVariant }], // add `as: '<alias>'` if CartItem defines one
+    include: [
+      {
+        model: ProductVariant,
+        as: 'variant',
+        include: [
+          {
+            model: Product,
+            as: 'product',
+            attributes: ['id', 'name', 'slug', 'price', 'primaryImage', 'isFinalSale'],
+          },
+        ],
+      },
+    ],
     order: [['id', 'ASC']],
   });
+  return rows.map(toCartLine);
 };
 
 const addItem = async (owner, variantId, quantity, retry = true) => {
@@ -176,4 +218,11 @@ const mergeGuestCart = async (customerId, sessionToken) => {
   }
 };
 
-module.exports = { getCart, addItem, updateItem, removeItem, mergeGuestCart };
+module.exports = {
+  toCartLine,
+  getCart,
+  addItem,
+  updateItem,
+  removeItem,
+  mergeGuestCart,
+};
