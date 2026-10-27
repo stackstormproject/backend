@@ -79,7 +79,13 @@ router.post(
   })
 );
 
-router.get('/admin/me', auth, rbac(ADMIN_ROLES), (req, res) => {
-  res.json({ userId: req.user.userId, role: req.user.role });
-});
+router.get(
+  '/admin/me',
+  auth,
+  rbac(ADMIN_ROLES),
+  asyncHandler(async (req, res) => {
+    const admin = await AuthService.getAdminProfile(req.user.id);
+    res.json({ userId: req.user.id, role: req.user.role, admin });
+  })
+);
 module.exports = { router, REFRESH_COOKIE, cookieOptions };
