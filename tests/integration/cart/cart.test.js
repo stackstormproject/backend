@@ -45,6 +45,19 @@ describe('Cart API', () => {
     expect(rows[0].quantity).toBe(3);
   });
 
+  it('should return cart lines with product name and unit price given a stocked cart', async () => {
+    const v = await createTestVariant({ stockQuantity: 10 });
+    await post({ variant_id: v.id, quantity: 2 });
+
+    const res = await request(app).get('/api/v1/cart').set('X-Session-Token', token);
+
+    expect(res.status).toBe(200);
+    expect(res.body.data.items).toHaveLength(1);
+    expect(res.body.data.items[0]).toMatchObject({ variant_id: v.id, quantity: 2 });
+    expect(res.body.data.items[0].product.id).toBe(v.productId);
+    expect(typeof res.body.data.items[0].unit_price).toBe('number');
+  });
+
   it('should return 400 CART_IDENTITY_REQUIRED given no identity (AC3)', async () => {
     const res = await request(app).get('/api/v1/cart');
 
