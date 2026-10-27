@@ -1,4 +1,5 @@
-const jwt = require('jsonwebtoken');
+const { verifyAccessToken } = require('../utils/tokenGenerator');
+const { toRequestUser } = require('./auth');
 
 const SESSION_TOKEN_RE = /^[A-Za-z0-9_-]{16,64}$/;
 
@@ -11,9 +12,7 @@ const optionalAuth = (req, res, next) => {
   const header = req.headers.authorization || '';
   if (header.startsWith('Bearer ')) {
     try {
-      const payload = jwt.verify(header.slice(7), process.env.JWT_SECRET);
-      // ADAPT: use whatever your login puts in the token (id / sub / customerId)
-      req.user = { id: payload.id ?? payload.sub, role: payload.role };
+      req.user = toRequestUser(verifyAccessToken(header.slice(7)));
     } catch (err) {
       return res.status(401).json({
         success: false,
@@ -30,7 +29,7 @@ const optionalAuth = (req, res, next) => {
  * a logged-in customer (customerId) or a guest (sessionToken).
  */
 const resolveCartIdentity = (req, res, next) => {
-  if (req.user && Number.isInteger(Number(req.user.id)) && req.user.role !== 'admin') {
+  if (req.user && Number.isInteger(Number(req.user.id)) && req.user.role === 'customer') {
     req.cartOwner = { customerId: Number(req.user.id) };
     return next();
   }
@@ -51,7 +50,7 @@ const resolveCartIdentity = (req, res, next) => {
  * a guest cart into their own.
  */
 const requireCustomer = (req, res, next) => {
-  if (!req.user || req.user.role === 'admin') {
+  if (!req.user || req.user.role !== 'customer') {
     return res.status(401).json({
       success: false,
       error: 'AUTH_REQUIRED',

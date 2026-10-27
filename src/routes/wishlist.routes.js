@@ -66,7 +66,7 @@ router.get('/', optionalAuth, async (req, res, next) => {
                 (v.stock_quantity ?? v.stockQuantity ?? 0) -
                   (v.reserved_quantity ?? v.reservedQuantity ?? 0)
               ),
-            25
+            0
           ),
         };
       })
@@ -83,20 +83,29 @@ router.get('/', optionalAuth, async (req, res, next) => {
  */
 router.post('/toggle', optionalAuth, async (req, res, next) => {
   try {
-    const { productId } = req.body;
-    if (!productId) {
-      return res.status(400).json({ success: false, message: 'productId is required' });
+    const productId = req.body.productId ?? req.body.product_id;
+    const numericProductId = Number(productId);
+    if (!Number.isInteger(numericProductId) || numericProductId < 1) {
+      return res
+        .status(400)
+        .json({ error: 'VALIDATION_ERROR', message: 'productId must be a positive integer' });
     }
 
+    // SRS FR005: the wishlist belongs to registered customers. Guests are told so
+    // honestly instead of receiving a success that was never stored.
     if (!req.user || !req.user.id) {
-      // Guest fallback: acknowledge toggle
-      return res.status(200).json({
-        success: true,
-        data: { wishlisted: true, productId, message: 'Item saved locally' },
-      });
+      return res
+        .status(401)
+        .json({ error: 'AUTH_REQUIRED', message: 'Sign in to save items to your wishlist' });
     }
 
-    const numericProductId = parseInt(productId, 10);
+    const product = await Product.findByPk(numericProductId, { attributes: ['id'] });
+    if (!product) {
+      return res
+        .status(404)
+        .json({ error: 'NOT_FOUND', message: `Product ${numericProductId} not found` });
+    }
+
     const existing = await Wishlist.findOne({
       where: { customerId: req.user.id, productId: numericProductId },
     });
@@ -105,7 +114,11 @@ router.post('/toggle', optionalAuth, async (req, res, next) => {
       await existing.destroy();
       return res.status(200).json({
         success: true,
-        data: { wishlisted: false, productId, message: 'Item removed from wishlist' },
+        data: {
+          wishlisted: false,
+          productId: numericProductId,
+          message: 'Item removed from wishlist',
+        },
       });
     }
 
@@ -116,7 +129,7 @@ router.post('/toggle', optionalAuth, async (req, res, next) => {
 
     return res.status(200).json({
       success: true,
-      data: { wishlisted: true, productId, message: 'Item added to wishlist' },
+      data: { wishlisted: true, productId: numericProductId, message: 'Item added to wishlist' },
     });
   } catch (err) {
     return next(err);
