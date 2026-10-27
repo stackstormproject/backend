@@ -38,6 +38,12 @@ module.exports = (sequelize) => {
         defaultValue: false,
         field: 'is_final_sale',
       },
+      isActive: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: true,
+        field: 'is_active',
+      },
       primaryImage: {
         type: DataTypes.STRING,
         allowNull: true,
