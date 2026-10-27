@@ -180,7 +180,15 @@ async function revokeSession(rawToken) {
   );
 }
 
+/** Public profile for the signed-in admin (name and email for the admin app header). */
+async function getAdminProfile(adminId) {
+  const admin = await Admin.findByPk(adminId);
+  if (!admin) throw new AppError(401, 'INVALID_TOKEN', 'Admin account no longer exists.');
+  return toPublicAdmin(admin);
+}
+
 module.exports = {
+  getAdminProfile,
   refreshSession,
   revokeSession,
   loginAdmin,
