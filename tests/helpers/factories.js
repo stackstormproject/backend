@@ -72,10 +72,11 @@ const insertRow = async (table, overrides = {}) => {
   return row;
 };
 
-const createTestVariant = async ({ stockQuantity = 10, reservedQuantity = 0 } = {}) => {
-  const product = await insertRow('products');
+/** Creates a variant of a new product, or of `productId` (another size of it). */
+const createTestVariant = async ({ stockQuantity = 10, reservedQuantity = 0, productId } = {}) => {
+  const productIdToUse = productId || (await insertRow('products')).id;
   const variant = await insertRow('product_variants', {
-    product_id: product.id,
+    product_id: productIdToUse,
     sku: `SKU-${unique()}`,
     stock_quantity: stockQuantity,
     reserved_quantity: reservedQuantity,
