@@ -138,8 +138,28 @@ describe('checkoutService', () => {
 
   describe('initiateCheckout', () => {
     const { initiateCheckout } = require('../../../src/services/checkout.service');
-    const { ProductVariant, Order, OrderItem } = require('../../../src/models');
+    const { ProductVariant, Order, OrderItem, sequelize } = require('../../../src/models');
     const reservationService = require('../../../src/services/reservation.service');
+
+    beforeEach(() => {
+      jest.spyOn(sequelize, 'transaction').mockImplementation(async (fn) => fn({}));
+      jest.spyOn(sequelize, 'query').mockResolvedValue([]);
+    });
+
+    afterEach(() => {
+      jest.restoreAllMocks();
+    });
+
+    const stockedVariant = (overrides = {}) => ({
+      id: 1,
+      sku: 'BATIK-BLU-M',
+      size: 'M',
+      color: 'Blue',
+      additionalPrice: '0.00',
+      product: { id: 9, name: 'Batik Shirt', slug: 'batik-shirt', price: '3000.00' },
+      ...overrides,
+    });
+    const validAddress = { line1: '123 Beach Road', city: 'Dickwella', postal_code: '81200' };
 
     it('should throw bad request for guest checkout without email', async () => {
       await expect(
@@ -227,16 +247,7 @@ describe('checkoutService', () => {
     });
 
     it('should initiate checkout, reserve stock, and persist order with billing address and standard shipping fee', async () => {
-      jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([
-        {
-          id: 1,
-          sku: 'BATIK-BLU-M',
-          size: 'M',
-          color: 'Blue',
-          price_override: null,
-          product: { title: 'Batik Shirt', base_price: 3000.0 },
-        },
-      ]);
+      jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([stockedVariant()]);
 
       jest.spyOn(reservationService, 'reserveStock').mockResolvedValue({
         reservation_id: 'res_test_123',
@@ -272,6 +283,74 @@ describe('checkoutService', () => {
       expect(result.breakdown.subtotal).toBe(3000.0);
       expect(result.breakdown.shipping_fee).toBe(450.0);
       expect(result.breakdown.total_amount).toBe(3450.0);
+      expect(result.items[0].title).toBe('Batik Shirt');
+      expect(OrderItem.bulkCreate).toHaveBeenCalledWith(
+        [expect.objectContaining({ productVariantId: 1, unitPrice: 3000 })],
+        expect.anything()
+      );
+      expect(sequelize.query).toHaveBeenCalledWith(
+        expect.stringContaining('UPDATE stock_reservations'),
+        expect.objectContaining({ replacements: { orderId: 501, id: 'res_test_123' } })
+      );
+    });
+
+    it('should add the variant surcharge to the unit price given an XXL variant', async () => {
+      jest
+        .spyOn(ProductVariant, 'findAll')
+        .mockResolvedValue([stockedVariant({ additionalPrice: '500.00' })]);
+      jest.spyOn(reservationService, 'reserveStock').mockResolvedValue({ reservation_id: 'r1' });
+      jest.spyOn(Order, 'create').mockResolvedValue({ id: 7, status: 'payment_pending' });
+      jest.spyOn(OrderItem, 'bulkCreate').mockResolvedValue([]);
+
+      const result = await initiateCheckout({
+        customerId: 4,
+        shippingAddress: validAddress,
+        items: [{ variant_id: 1, quantity: 2 }],
+      });
+
+      expect(result.breakdown.subtotal).toBe(7000);
+      expect(result.breakdown.shipping_fee).toBe(450);
+    });
+
+    it('should reject a variant whose product has no price', async () => {
+      jest
+        .spyOn(ProductVariant, 'findAll')
+        .mockResolvedValue([stockedVariant({ product: { name: 'Broken', price: null } })]);
+
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: validAddress,
+          items: [{ variantId: 1, quantity: 1 }],
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('should reject an unknown shipping method', async () => {
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: validAddress,
+          items: [{ variantId: 1, quantity: 1 }],
+          shippingMethod: 'teleport',
+        })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('should release the stock hold given the order insert fails', async () => {
+      jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([stockedVariant()]);
+      jest.spyOn(reservationService, 'reserveStock').mockResolvedValue({ reservation_id: 'r9' });
+      const release = jest.spyOn(reservationService, 'releaseReservation').mockResolvedValue(true);
+      jest.spyOn(Order, 'create').mockRejectedValue(new Error('db down'));
+
+      await expect(
+        initiateCheckout({
+          customerId: 4,
+          shippingAddress: validAddress,
+          items: [{ variantId: 1, quantity: 1 }],
+        })
+      ).rejects.toThrow('db down');
+      expect(release).toHaveBeenCalledWith('r9');
     });
   });
 });
