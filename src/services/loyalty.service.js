@@ -152,40 +152,28 @@ const redeemPoints = async (customerId, pointsToRedeem, description = 'Points re
     throw ApiError.badRequest('Points to redeem must be a positive integer');
   }
 
-  const account = await Loyalty.findOne({ where: { customerId } });
-  if (!account || account.currentPoints < points) {
-    throw ApiError.conflict('Insufficient loyalty points balance');
-  }
-
-  const newBalance = account.currentPoints - points;
-
-  if (sequelize && typeof sequelize.transaction === 'function') {
-    await sequelize.transaction(async (t) => {
-      await account.update({ currentPoints: newBalance }, { transaction: t });
-      await LoyaltyTransaction.create(
-        {
-          customerId,
-          points: -points,
-          transactionType: 'redeemed',
-          description,
-        },
-        { transaction: t }
-      );
-      await Customer.update(
-        { loyaltyPoints: newBalance },
-        { where: { id: customerId }, transaction: t }
-      );
+  // Row lock: two simultaneous redemptions must not both spend the same points.
+  const newBalance = await sequelize.transaction(async (t) => {
+    const account = await Loyalty.findOne({
+      where: { customerId },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
     });
-  } else {
-    await account.update({ currentPoints: newBalance });
-    await LoyaltyTransaction.create({
-      customerId,
-      points: -points,
-      transactionType: 'redeemed',
-      description,
-    });
-    await Customer.update({ loyaltyPoints: newBalance }, { where: { id: customerId } });
-  }
+    if (!account || account.currentPoints < points) {
+      throw ApiError.conflict('Insufficient loyalty points balance');
+    }
+    const balance = account.currentPoints - points;
+    await account.update({ currentPoints: balance }, { transaction: t });
+    await LoyaltyTransaction.create(
+      { customerId, points: -points, transactionType: 'redeemed', description },
+      { transaction: t }
+    );
+    await Customer.update(
+      { loyaltyPoints: balance },
+      { where: { id: customerId }, transaction: t }
+    );
+    return balance;
+  });
 
   logger.info(
     `[LOYALTY] Customer ${customerId} redeemed ${points} points. New balance: ${newBalance}`
