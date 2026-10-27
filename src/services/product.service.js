@@ -6,7 +6,6 @@
 
 const { Op, Sequelize } = require('sequelize');
 const { Product, ProductVariant, ProductImage, Category, Review } = require('../models');
-const ApiError = require('../utils/ApiError');
 const cacheService = require('./cache.service');
 
 /**
@@ -87,6 +86,7 @@ const fetchProductDetailFromDb = async (slug) => {
   const product = await Product.findOne({
     where: {
       [Op.or]: whereConditions,
+      isActive: true,
     },
     include: [
       {
@@ -187,78 +187,6 @@ const getProductBySlug = async (slug) => {
 };
 
 /**
- * Creates a new product with optional slug auto-generation.
- *
- * @param {object} data - Product attributes (name, price, description, ...)
- * @returns {Promise<object>} Created product instance
- */
-const createProduct = async (data) => {
-  // Auto-generate slug from name if not provided
-  const slug = data.slug || slugify(data.name);
-
-  // Normalize variants if provided
-  const hasVariants = Array.isArray(data.variants) && data.variants.length > 0;
-  const options = hasVariants ? { include: [{ model: ProductVariant, as: 'variants' }] } : {};
-
-  const product = await Product.create(
-    {
-      ...data,
-      slug,
-    },
-    options
-  );
-
-  // Invalidate any cache after creation
-  await cacheService.invalidateProductCache(product.id, slug).catch(() => {});
-
-  return product;
-};
-
-/**
- * Updates product details and purges matching Redis cache keys.
- *
- * @param {number|string} id - Product ID
- * @param {object} data - Updated attributes
- * @returns {Promise<object>} Updated product instance
- */
-const updateProduct = async (id, data) => {
-  const product = await Product.findByPk(id);
-  if (!product) {
-    throw ApiError.notFound(`Product not found with id: ${id}`);
-  }
-
-  const oldSlug = product.slug;
-  await product.update(data);
-  const newSlug = product.slug;
-
-  await cacheService.invalidateProductCache(id, oldSlug);
-  if (newSlug && newSlug !== oldSlug) {
-    await cacheService.invalidateProductCache(id, newSlug);
-  }
-
-  return product;
-};
-
-/**
- * Deletes a product and purges matching Redis cache keys.
- *
- * @param {number|string} id - Product ID
- * @returns {Promise<boolean>} True if deleted
- */
-const deleteProduct = async (id) => {
-  const product = await Product.findByPk(id);
-  if (!product) {
-    throw ApiError.notFound(`Product not found with id: ${id}`);
-  }
-
-  const { slug } = product;
-  await product.destroy();
-
-  await cacheService.invalidateProductCache(id, slug);
-  return true;
-};
-
-/**
  * Lists products with faceted filtering and pagination.
  *
  * @param {object} params - Filter and pagination criteria
@@ -275,7 +203,7 @@ const listProducts = async ({
   page = 1,
   limit = 12,
 }) => {
-  const andConditions = [];
+  const andConditions = [{ isActive: true }]; // archived products are hidden from the shop
   const variantWhere = {};
 
   if (categoryId && categoryId !== 'all' && categoryId !== 'null' && categoryId !== 'undefined') {
@@ -523,9 +451,6 @@ module.exports = {
   formatVariant,
   fetchProductDetailFromDb,
   getProductBySlug,
-  createProduct,
-  updateProduct,
-  deleteProduct,
   invalidateProductCache: cacheService.invalidateProductCache,
   listProducts,
 };

@@ -47,7 +47,7 @@ describe('Admin role matrix', () => {
     ['get', '/api/v1/admin/analytics'],
     ['get', '/api/v1/admin/orders'],
     ['patch', '/api/v1/admin/orders/1/status'],
-    ['post', '/api/v1/products'],
+    ['post', '/api/v1/admin/products'],
     ['post', '/api/v1/upload/images'],
   ])('should refuse a support agent: %s %s', async (method, url) => {
     const res = await request(app)

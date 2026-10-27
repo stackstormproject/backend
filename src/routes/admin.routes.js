@@ -3,6 +3,7 @@ const analyticsController = require('../controllers/analytics.controller');
 const supportController = require('../controllers/support.controller');
 const adminOrderController = require('../controllers/adminOrder.controller');
 const adminInventoryController = require('../controllers/adminInventory.controller');
+const adminProductController = require('../controllers/adminProduct.controller');
 const { auth } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
 const { MANAGER_ROLES, SUPPORT_ROLES } = require('../config/constants');
@@ -21,6 +22,15 @@ router.get('/analytics/sales-trend', managers, analyticsController.getSalesTrend
 router.get('/orders', managers, adminOrderController.list);
 router.get('/orders/:id', managers, adminOrderController.detail);
 router.patch('/orders/:id/status', managers, adminOrderController.updateStatus);
+
+router.get('/products', managers, adminProductController.list);
+router.post('/products', managers, adminProductController.create);
+router.get('/products/:id', managers, adminProductController.detail);
+router.put('/products/:id', managers, adminProductController.update);
+router.delete('/products/:id', managers, adminProductController.remove);
+router.post('/products/:id/variants', managers, adminProductController.addVariant);
+router.patch('/products/:id/variants/:variantId', managers, adminProductController.updateVariant);
+router.delete('/products/:id/variants/:variantId', managers, adminProductController.removeVariant);
 
 router.get('/inventory', managers, adminInventoryController.list);
 router.post('/inventory/:variantId/adjust', managers, adminInventoryController.adjust);

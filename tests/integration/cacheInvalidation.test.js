@@ -74,78 +74,48 @@ describe('Cache Invalidation Pipeline & Cache-Aside Integration Tests (STORM-022
       expect(res2.body.data.price).toBe(4500);
     });
 
-    it('should reject unauthenticated PUT /api/v1/products/:id with 401', async () => {
-      const res = await request(app).put('/api/v1/products/10').send({ price: 5500 });
+    // Product writes moved to /admin/products in #136 (whitelisted fields, archiving).
+    it('should reject unauthenticated PUT /api/v1/admin/products/:id with 401', async () => {
+      const res = await request(app).put('/api/v1/admin/products/10').send({ price: 5500 });
 
       expect(res.status).toBe(401);
     });
 
-    it('should reject customer role on PUT /api/v1/products/:id with 403', async () => {
+    it('should reject customer role on PUT /api/v1/admin/products/:id with 403', async () => {
       const res = await request(app)
-        .put('/api/v1/products/10')
+        .put('/api/v1/admin/products/10')
         .set('Authorization', `Bearer ${customerToken}`)
         .send({ price: 5500 });
 
       expect(res.status).toBe(403);
     });
 
-    it('should invalidate product cache keys and pattern upon admin PUT update', async () => {
-      const existingProduct = {
-        id: 10,
-        slug: 'handloom-linen-batik-shirt',
-        name: 'Handloom Linen Batik Shirt',
+    it('should invalidate product cache keys and patterns on admin update and delete', async () => {
+      const product = await Product.create({
+        name: `Cache Test ${Date.now()}`,
+        slug: `cache-test-${Date.now()}`,
         price: 4500,
-        update: jest.fn().mockImplementation(function (data) {
-          Object.assign(this, data);
-          return Promise.resolve(this);
-        }),
-      };
-
-      jest.spyOn(Product, 'findByPk').mockResolvedValue(existingProduct);
+      });
       const delSpy = jest.spyOn(redisClient, 'del').mockResolvedValue(1);
       const scanSpy = jest.spyOn(redisClient, 'scan').mockResolvedValue(['0', []]);
 
-      const res = await request(app)
-        .put('/api/v1/products/10')
+      const updated = await request(app)
+        .put(`/api/v1/admin/products/${product.id}`)
         .set('Authorization', `Bearer ${adminToken}`)
         .send({ price: 5500 });
+      const removed = await request(app)
+        .delete(`/api/v1/admin/products/${product.id}`)
+        .set('Authorization', `Bearer ${adminToken}`);
 
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(existingProduct.update).toHaveBeenCalledWith({ price: 5500 });
-
-      // Verifies cache invalidation occurred
+      expect(updated.status).toBe(200);
+      expect(updated.body.data.price).toBe(5500);
+      expect(removed.status).toBe(200);
       expect(delSpy).toHaveBeenCalledWith(
-        'cache:product:10',
-        'cache:product:slug:handloom-linen-batik-shirt'
+        `cache:product:${product.id}`,
+        `cache:product:slug:${product.slug}`
       );
       expect(scanSpy).toHaveBeenCalledWith('0', 'MATCH', 'cache:product:*', 'COUNT', 100);
       expect(scanSpy).toHaveBeenCalledWith('0', 'MATCH', 'cache:products:*', 'COUNT', 100);
-    });
-
-    it('should invalidate product cache upon admin DELETE /api/v1/products/:id', async () => {
-      const existingProduct = {
-        id: 10,
-        slug: 'handloom-linen-batik-shirt',
-        destroy: jest.fn().mockResolvedValue(true),
-      };
-
-      jest.spyOn(Product, 'findByPk').mockResolvedValue(existingProduct);
-      const delSpy = jest.spyOn(redisClient, 'del').mockResolvedValue(1);
-      const scanSpy = jest.spyOn(redisClient, 'scan').mockResolvedValue(['0', []]);
-
-      const res = await request(app)
-        .delete('/api/v1/products/10')
-        .set('Authorization', `Bearer ${adminToken}`);
-
-      expect(res.status).toBe(200);
-      expect(res.body.success).toBe(true);
-      expect(existingProduct.destroy).toHaveBeenCalled();
-      expect(delSpy).toHaveBeenCalledWith(
-        'cache:product:10',
-        'cache:product:slug:handloom-linen-batik-shirt'
-      );
-      expect(scanSpy).toHaveBeenCalledWith('0', 'MATCH', 'cache:product:*', 'COUNT', 100);
     });
   });
 
