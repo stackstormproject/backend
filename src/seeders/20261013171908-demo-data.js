@@ -22,6 +22,15 @@ module.exports = {
         created_at: now,
         updated_at: now,
       },
+      {
+        // Refs #140: a support-only account, so the admin console's role limits can be tried.
+        email: 'support@stackstorm.lk',
+        name: 'Nimali Perera',
+        hashed_password: adminHash,
+        role: 'support_agent',
+        created_at: now,
+        updated_at: now,
+      },
     ]);
 
     await queryInterface.bulkInsert('customers', [
