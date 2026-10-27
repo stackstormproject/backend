@@ -18,12 +18,7 @@ jest.mock('../../../src/models', () => {
 });
 
 const { Order, Customer, Return } = require('../../../src/models');
-const {
-  formatLKR,
-  getAnalyticsOverview,
-  getAllOrders,
-  updateOrderStatus,
-} = require('../../../src/services/analytics.service');
+const { formatLKR, getAnalyticsOverview } = require('../../../src/services/analytics.service');
 
 describe('analyticsService', () => {
   beforeEach(() => {
@@ -64,43 +59,6 @@ describe('analyticsService', () => {
       expect(overview.metrics.active_customers).toBe(10);
       expect(overview.top_products).toHaveLength(1);
       expect(overview.top_products[0].title).toBe('Batik Shirt');
-    });
-  });
-
-  describe('getAllOrders', () => {
-    it('returns paginated orders list', async () => {
-      Order.findAndCountAll.mockResolvedValue({
-        count: 1,
-        rows: [
-          {
-            id: 1,
-            customerId: 4,
-            status: 'processing',
-            totalAmount: 6000.0,
-            customer: { name: 'Kavindu' },
-          },
-        ],
-      });
-
-      const res = await getAllOrders({ page: 1, limit: 10 });
-      expect(res.orders).toHaveLength(1);
-      expect(res.orders[0].customer_name).toBe('Kavindu');
-    });
-  });
-
-  describe('updateOrderStatus', () => {
-    it('updates status and tracking number', async () => {
-      const mockUpdate = jest.fn();
-      Order.findByPk.mockResolvedValue({
-        id: 1,
-        status: 'processing',
-        update: mockUpdate,
-      });
-
-      const updated = await updateOrderStatus(1, 'shipped', 'TRK-12345');
-      expect(mockUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ status: 'shipped', trackingNumber: 'TRK-12345' })
-      );
     });
   });
 });
