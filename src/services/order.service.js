@@ -56,7 +56,14 @@ const getOrderById = async (orderId, customerId = null, guestToken = null) => {
               {
                 model: Product,
                 as: 'product',
-                attributes: ['id', 'title', 'slug', 'base_price'],
+                attributes: [
+                  'id',
+                  ['name', 'title'],
+                  'name',
+                  'slug',
+                  ['price', 'base_price'],
+                  'price',
+                ],
               },
             ],
           },
@@ -157,7 +164,14 @@ const getCustomerOrders = async (customerId, options = {}) => {
               {
                 model: Product,
                 as: 'product',
-                attributes: ['id', 'title', 'slug', 'base_price'],
+                attributes: [
+                  'id',
+                  ['name', 'title'],
+                  'name',
+                  'slug',
+                  ['price', 'base_price'],
+                  'price',
+                ],
               },
             ],
           },
