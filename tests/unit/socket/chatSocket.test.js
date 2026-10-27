@@ -2,7 +2,7 @@ const http = require('http');
 const { generateAccessToken } = require('../../../src/utils/tokenGenerator');
 const { io: Client } = require('socket.io-client');
 const { initSocketServer } = require('../../../src/socket');
-const { ChatSession, ChatMessage } = require('../../../src/models');
+const { ChatSession, ChatMessage, Admin } = require('../../../src/models');
 
 // Mock Sequelize models
 jest.mock('../../../src/models', () => ({
@@ -13,6 +13,9 @@ jest.mock('../../../src/models', () => ({
   },
   ChatMessage: {
     create: jest.fn(),
+  },
+  Admin: {
+    findByPk: jest.fn(),
   },
 }));
 
@@ -205,6 +208,104 @@ describe('STORM-BE-CHAT: Socket.IO Real-Time Chat Gateway', () => {
       expect(server.rooms.has('admin_support_channel')).toBe(false);
       intruder.disconnect();
       done();
+    });
+  });
+
+  // Refs #139: the payload can no longer promote a customer to agent or open someone else's chat.
+  describe('agent identity and session ownership (#139)', () => {
+    const connect = (token) =>
+      new Promise((resolve) => {
+        const socket = Client(`http://localhost:${serverPort}`, {
+          transports: ['websocket'],
+          ...(token ? { auth: { token } } : {}),
+        });
+        socket.on('connect', () => resolve(socket));
+      });
+    const emit = (socket, event, data) =>
+      new Promise((resolve) => {
+        socket.emit(event, data, resolve);
+      });
+    const serverSocketOf = (client) =>
+      [...io.of('/').sockets.values()].find((sk) => sk.id === client.id);
+    const savedMessage = (overrides) => ({
+      id: 900,
+      chatSessionId: 301,
+      message: 'hi',
+      createdAt: new Date(),
+      ...overrides,
+    });
+
+    it('should keep a customer out of the agent channel given isAgent in the payload', async () => {
+      const customer = await connect(generateAccessToken(42, 'customer'));
+      ChatSession.findByPk.mockResolvedValue({ id: 301, customerId: 42, save: jest.fn() });
+      ChatSession.findOne.mockResolvedValue(null);
+      ChatMessage.create.mockResolvedValue(savedMessage({ senderType: 'customer' }));
+
+      await emit(customer, 'chat:join', { sessionId: 301, isAgent: true, role: 'support_agent' });
+      const sent = await emit(customer, 'chat:message', {
+        sessionId: 301,
+        message: 'hi',
+        isAgent: true,
+        senderRole: 'support_agent',
+        senderName: 'Fake Agent',
+      });
+
+      expect(serverSocketOf(customer).rooms.has('admin_support_channel')).toBe(false);
+      expect(sent.message.senderRole).toBe('customer');
+      expect(sent.message.senderName).toBe('Customer');
+      expect(ChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ senderType: 'customer', senderId: 42 })
+      );
+      customer.disconnect();
+    });
+
+    it("should refuse to let a customer join another customer's session", async () => {
+      const customer = await connect(generateAccessToken(42, 'customer'));
+      ChatSession.findByPk.mockResolvedValue({ id: 302, customerId: 7, save: jest.fn() });
+
+      const res = await emit(customer, 'chat:join', { sessionId: 302 });
+
+      expect(res.success).toBe(false);
+      expect(serverSocketOf(customer).rooms.has('chat_session_302')).toBe(false);
+      customer.disconnect();
+    });
+
+    it('should refuse a message to a session the customer has not joined', async () => {
+      const customer = await connect(generateAccessToken(42, 'customer'));
+
+      const res = await emit(customer, 'chat:message', { sessionId: 303, message: 'hello' });
+
+      expect(res.success).toBe(false);
+      expect(ChatMessage.create).not.toHaveBeenCalled();
+      customer.disconnect();
+    });
+
+    it("should sign agent messages with the agent's own name", async () => {
+      Admin.findByPk.mockResolvedValue({ id: 99, name: 'Nimali Perera' });
+      ChatMessage.create.mockResolvedValue(savedMessage({ senderType: 'agent' }));
+      const agent = await connect(generateAccessToken(99, 'support_agent'));
+
+      const sent = await emit(agent, 'chat:message', { sessionId: 301, message: 'hi' });
+
+      expect(sent.message).toMatchObject({
+        senderRole: 'support_agent',
+        senderName: 'Nimali Perera',
+      });
+      expect(ChatMessage.create).toHaveBeenCalledWith(
+        expect.objectContaining({ senderType: 'agent', senderId: 99 })
+      );
+      agent.disconnect();
+    });
+
+    it('should report a missing session to an agent instead of creating one', async () => {
+      ChatSession.findByPk.mockResolvedValue(null);
+      const agent = await connect(generateAccessToken(99, 'support_agent'));
+
+      const res = await emit(agent, 'chat:join', { sessionId: 404 });
+
+      expect(res.success).toBe(false);
+      expect(ChatSession.create).not.toHaveBeenCalled();
+      agent.disconnect();
     });
   });
 });
