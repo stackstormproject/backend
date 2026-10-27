@@ -124,3 +124,15 @@ describe('auth middleware', () => {
     });
   });
 });
+
+describe('toRequestUser', () => {
+  const { toRequestUser } = require('../../../src/middleware/auth');
+
+  it('should expose userId as id given a standard access-token payload', () => {
+    expect(toRequestUser({ userId: 7, role: 'customer' })).toMatchObject({ id: 7, userId: 7 });
+  });
+
+  it('should fall back to sub given a payload without userId', () => {
+    expect(toRequestUser({ sub: 9 }).id).toBe(9);
+  });
+});

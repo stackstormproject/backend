@@ -1,4 +1,4 @@
-const jwt = require('jsonwebtoken');
+const { generateAccessToken } = require('../../src/utils/tokenGenerator');
 const {
   resolveCartIdentity,
   optionalAuth,
@@ -14,13 +14,22 @@ const mockRes = () => {
 
 describe('resolveCartIdentity', () => {
   it('should use customerId given an authenticated customer', () => {
-    const req = { user: { id: 7 }, get: jest.fn() };
+    const req = { user: { id: 7, role: 'customer' }, get: jest.fn() };
     const next = jest.fn();
 
     resolveCartIdentity(req, mockRes(), next);
 
     expect(req.cartOwner).toEqual({ customerId: 7 });
     expect(next).toHaveBeenCalled();
+  });
+
+  it('should not give an admin role a customer cart', () => {
+    const req = { user: { id: 1, role: 'super_admin' }, get: jest.fn().mockReturnValue(undefined) };
+    const res = mockRes();
+
+    resolveCartIdentity(req, res, jest.fn());
+
+    expect(res.status).toHaveBeenCalledWith(400);
   });
 
   it('should use sessionToken given a valid X-Session-Token header', () => {
@@ -86,13 +95,13 @@ describe('optionalAuth', () => {
   });
 
   it('should set req.user given a valid Bearer token', () => {
-    const token = jwt.sign({ id: 7, role: 'customer' }, 'test-secret');
+    const token = generateAccessToken(7, 'customer');
     const req = { headers: { authorization: `Bearer ${token}` } };
     const next = jest.fn();
 
     optionalAuth(req, mockRes(), next);
 
-    expect(req.user).toEqual({ id: 7, role: 'customer' });
+    expect(req.user).toMatchObject({ id: 7, userId: 7, role: 'customer' });
     expect(next).toHaveBeenCalled();
   });
 

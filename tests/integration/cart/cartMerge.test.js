@@ -1,6 +1,6 @@
 const crypto = require('crypto');
 const request = require('supertest');
-const jwt = require('jsonwebtoken');
+const { generateAccessToken } = require('../../../src/utils/tokenGenerator');
 const { Op } = require('sequelize');
 const { Cart, CartItem, sequelize } = require('../../../src/models');
 const app = require('../../../src/app');
@@ -129,7 +129,7 @@ describe('Cart merge', () => {
 
   it('should return 400 given a logged-in customer with no valid session token (AC4)', async () => {
     const customer = await makeCustomer();
-    const bearer = jwt.sign({ id: customer.id, role: 'customer' }, process.env.JWT_SECRET);
+    const bearer = generateAccessToken(customer.id, 'customer');
 
     const res = await request(app)
       .post('/api/v1/cart/merge')
