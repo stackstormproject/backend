@@ -88,6 +88,16 @@ const requestReturn = async (params = {}) => {
     if (!exchangeVariant) {
       throw ApiError.notFound(`Exchange variant with ID '${exchangeVariantId}' not found`);
     }
+    // Refs #155: an exchange is another size or colour of the same product, never a
+    // different (possibly dearer) product and never the same variant again.
+    if (Number(exchangeVariant.productId) !== Number(orderItem.variant?.productId)) {
+      throw ApiError.badRequest(
+        'An exchange must be for another size or colour of the same product'
+      );
+    }
+    if (Number(exchangeVariant.id) === Number(orderItem.variant?.id)) {
+      throw ApiError.badRequest('Choose a different size or colour to exchange for');
+    }
   }
 
   const refundAmount =
