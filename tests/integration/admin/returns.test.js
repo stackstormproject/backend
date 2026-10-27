@@ -33,7 +33,11 @@ describe('Admin returns workflow', () => {
   /** Real flow: checkout, pay, ship, deliver, then the customer asks for a return. */
   const deliveredReturn = async ({ type = 'return', exchangeStock = 5 } = {}) => {
     const variant = await createTestVariant({ stockQuantity: 10 });
-    const other = await createTestVariant({ stockQuantity: exchangeStock });
+    // Refs #155: the replacement is another size of the same product.
+    const other = await createTestVariant({
+      stockQuantity: exchangeStock,
+      productId: variant.productId,
+    });
     await sequelize.query('UPDATE products SET price = 3000 WHERE id = :id', {
       replacements: { id: variant.productId },
     });
