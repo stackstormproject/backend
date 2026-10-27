@@ -1,158 +1,222 @@
 // ==============================================================================
-// Stripe Payment Gateway Service - Intent Creation & Cryptographic Webhooks
-// Why this file matters: Manages PCI-DSS compliant credit card transactions in LKR,
-// converts floating-point currency into safe integer cents, and cryptographically
-// validates incoming Stripe webhook signatures using raw request buffers.
+// Payment Service - Stripe PaymentIntents, server-side verification and webhooks
+// Why this file matters: an order only becomes "paid" after the server itself has
+// confirmed the PaymentIntent with Stripe. The browser is never trusted to say so.
 // ==============================================================================
 
 const Stripe = require('stripe');
-const { Order, Payment } = require('../models');
+const { QueryTypes } = require('sequelize');
+const { Order, sequelize } = require('../models');
 const reservationService = require('./reservation.service');
+const { canReadOrder } = require('./order.service');
 const logger = require('../config/logger');
 const ApiError = require('../utils/ApiError');
 
-// Environment API Keys
-const STRIPE_SECRET_KEY = process.env.STRIPE_SECRET_KEY || 'sk_test_mock_stackstorm_key_2026';
-const STRIPE_WEBHOOK_SECRET =
-  process.env.STRIPE_WEBHOOK_SECRET || 'whsec_mock_stackstorm_webhook_secret_key_2026';
-
-// Instantiate Stripe client using pinned API version
-const stripe = new Stripe(STRIPE_SECRET_KEY, {
-  apiVersion: '2023-10-16',
-});
+const CURRENCY = 'lkr';
+const PAYABLE_STATUS = 'payment_pending';
+const PAID_STATUS = 'processing';
+const MOCK_PROVIDER = 'mock';
+const STRIPE_PROVIDER = 'stripe';
+const PLACEHOLDER_KEY = /^sk_(test|live)_(x+|mock.*)$/i;
 
 /**
- * Creates a Stripe PaymentIntent for the specified Order in LKR.
- *
- * @param {string} orderId - Order UUID
- * @returns {Promise<object>} PaymentIntent metadata including client_secret
+ * Stripe when a real secret key is configured. Outside production a missing or placeholder key
+ * selects the mock provider so local development and CI work without a Stripe account.
+ * Production without a key is a configuration error, never a silent mock.
  */
-const createPaymentIntent = async (orderId) => {
-  if (!orderId) {
-    throw ApiError.badRequest('order_id is required to create a payment intent');
+const getProvider = () => {
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (key && !PLACEHOLDER_KEY.test(key)) return STRIPE_PROVIDER;
+  if (process.env.NODE_ENV === 'production') {
+    throw new ApiError(503, 'Payments are not configured', undefined, 'PAYMENTS_UNAVAILABLE');
   }
+  return MOCK_PROVIDER;
+};
 
-  // Load the order from PostgreSQL
+let stripeClient;
+const getStripe = () => {
+  if (!stripeClient) {
+    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+  }
+  return stripeClient;
+};
+
+/** Integer minor units, avoiding floating-point drift (LKR 8,850.00 -> 885000). */
+const toMinorUnits = (amount) => Math.round(Number(amount) * 100);
+
+/** Loads an order the caller may act on; anything else is "not found" (no id probing). */
+const loadOwnedOrder = async (orderId, { customerId = null, guestToken = null } = {}) => {
+  if (!orderId) throw ApiError.badRequest('order_id is required');
   const order = await Order.findByPk(orderId);
-  if (!order) {
-    throw ApiError.notFound(`Order not found with id: ${orderId}`);
+  if (!order || !canReadOrder(order, customerId, guestToken)) {
+    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
   }
-
-  // [INTEGER CENTS CONVERSION]:
-  // Prevents JavaScript IEEE 754 floating-point rounding errors
-  const amountInCents = Math.round(Number(order.total_amount) * 100);
-
-  // [CREATE INTENT ON STRIPE SERVERS]:
-  const paymentIntent = await stripe.paymentIntents.create({
-    amount: amountInCents,
-    currency: 'lkr',
-    // [AUDIT METADATA]:
-    // Attaching our internal order_id allows webhook handlers to identify
-    // which order was paid when Stripe sends asynchronous webhook notifications!
-    metadata: {
-      order_id: String(order.id),
-      order_number: String(order.order_number),
-    },
-    payment_method_types: ['card'],
-  });
-
-  // Idempotently create or update the Payment record in our database
-  await Payment.findOrCreate({
-    where: { order_id: order.id },
-    defaults: {
-      order_id: order.id,
-      payment_method: 'stripe',
-      payment_intent_id: paymentIntent.id,
-      amount: Number(order.total_amount),
-      currency: 'LKR',
-      status: 'pending',
-      raw_response: paymentIntent,
-    },
-  });
-
-  return {
-    clientSecret: paymentIntent.client_secret,
-    paymentIntentId: paymentIntent.id,
-    orderId: order.id,
-    amount: Number(order.total_amount),
-    currency: 'LKR',
-    status: paymentIntent.status,
-  };
+  return order;
 };
 
 /**
- * Cryptographically verifies an incoming Stripe webhook signature.
- * [SECURITY RULE: MUST USE RAW BUFFER]:
- * The payload MUST be the exact, untouched raw Buffer from the HTTP request socket.
- * If Express parsed it into a JavaScript object first, key order or whitespace changes
- * will cause the HMAC-SHA256 signature check to fail!
- *
- * @param {Buffer} rawPayload - Raw binary HTTP request body
- * @param {string} signature - Stripe-Signature header string
- * @returns {object} Verified Stripe event object
+ * Creates (or reuses) the PaymentIntent for a payment_pending order.
+ * The amount always comes from the stored order total, never from the client.
  */
-const constructWebhookEvent = (rawPayload, signature) => {
-  if (!signature) {
-    throw ApiError.badRequest('Missing Stripe-Signature header');
-  }
-  if (!rawPayload) {
-    throw ApiError.badRequest('Missing raw webhook payload body');
+const createPaymentIntent = async (orderId, caller = {}) => {
+  const order = await loadOwnedOrder(orderId, caller);
+  if (order.status !== PAYABLE_STATUS) {
+    throw ApiError.conflict(`Order ${order.id} is not awaiting payment (status: ${order.status})`);
   }
 
+  const amount = Number(order.totalAmount);
+  const provider = getProvider();
+
+  if (provider === MOCK_PROVIDER) {
+    const paymentIntentId = order.paymentIntentId || `mock_pi_${order.id}_${Date.now()}`;
+    if (!order.paymentIntentId) await order.update({ paymentIntentId });
+    return {
+      provider,
+      clientSecret: `${paymentIntentId}_secret_mock`,
+      paymentIntentId,
+      orderId: order.id,
+      amount,
+      currency: 'LKR',
+    };
+  }
+
+  const stripe = getStripe();
+  let intent = order.paymentIntentId
+    ? await stripe.paymentIntents.retrieve(order.paymentIntentId)
+    : null;
+  if (!intent || intent.status === 'canceled') {
+    intent = await stripe.paymentIntents.create(
+      {
+        amount: toMinorUnits(amount),
+        currency: CURRENCY,
+        metadata: { order_id: String(order.id) },
+        payment_method_types: ['card'],
+      },
+      { idempotencyKey: `order-${order.id}-${toMinorUnits(amount)}` }
+    );
+    await order.update({ paymentIntentId: intent.id });
+  }
+
+  return {
+    provider,
+    clientSecret: intent.client_secret,
+    paymentIntentId: intent.id,
+    orderId: order.id,
+    amount,
+    currency: 'LKR',
+  };
+};
+
+/** Finds the stock hold that checkout linked to this order (see checkout.service). */
+const findOrderReservationId = async (orderId) => {
+  const [row] = await sequelize.query(
+    `SELECT id FROM stock_reservations WHERE order_id = :orderId
+      ORDER BY created_at DESC LIMIT 1`,
+    { replacements: { orderId }, type: QueryTypes.SELECT }
+  );
+  return row ? row.id : null;
+};
+
+/**
+ * Marks a verified order as paid and turns its 15-minute hold into a permanent deduction.
+ * Idempotent: a webhook and the browser may both report the same success.
+ */
+const markOrderPaid = async (order, paymentIntentId) => {
+  if (order.status === PAID_STATUS) return { orderId: order.id, status: order.status };
+  if (order.status !== PAYABLE_STATUS) {
+    throw ApiError.conflict(`Order ${order.id} cannot be paid (status: ${order.status})`);
+  }
+
+  const reservationId = await findOrderReservationId(order.id);
+  if (reservationId) {
+    // false means the hold already expired or was settled; the order still records payment
+    const confirmed = await reservationService.confirmReservation(reservationId);
+    if (!confirmed) {
+      logger.warn(`[PAYMENT] Reservation ${reservationId} for order ${order.id} was not active`);
+    }
+  }
+
+  await order.update({ status: PAID_STATUS, paymentIntentId });
+  logger.info(`[PAYMENT] Order ${order.id} paid (${paymentIntentId})`);
+  return { orderId: order.id, status: PAID_STATUS };
+};
+
+/**
+ * Called by the storefront after Stripe.js reports success. The server re-checks the intent
+ * with Stripe (status, amount, order metadata) before trusting it.
+ */
+const confirmOrderPayment = async (orderId, caller = {}, paymentIntentId = null) => {
+  const order = await loadOwnedOrder(orderId, caller);
+  if (order.status === PAID_STATUS) return { orderId: order.id, status: order.status };
+
+  const intentId = paymentIntentId || order.paymentIntentId;
+  if (!intentId || intentId !== order.paymentIntentId) {
+    throw ApiError.badRequest('Payment intent does not belong to this order');
+  }
+
+  if (getProvider() === STRIPE_PROVIDER) {
+    const intent = await getStripe().paymentIntents.retrieve(intentId);
+    const amountMatches = intent.amount === toMinorUnits(order.totalAmount);
+    const orderMatches = String(intent.metadata?.order_id) === String(order.id);
+    if (intent.status !== 'succeeded' || !amountMatches || !orderMatches) {
+      throw new ApiError(
+        402,
+        `Payment not completed (status: ${intent.status})`,
+        undefined,
+        'PAYMENT_NOT_COMPLETED'
+      );
+    }
+  }
+
+  return markOrderPaid(order, intentId);
+};
+
+/** Verifies a Stripe webhook signature against the raw request bytes. */
+const constructWebhookEvent = (rawPayload, signature) => {
+  if (!signature) throw ApiError.badRequest('Missing Stripe-Signature header');
+  if (!rawPayload) throw ApiError.badRequest('Missing raw webhook payload body');
   try {
-    return stripe.webhooks.constructEvent(rawPayload, signature, STRIPE_WEBHOOK_SECRET);
+    return getStripe().webhooks.constructEvent(
+      rawPayload,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
   } catch (err) {
     logger.error(`[STRIPE] Signature verification failed: ${err.message}`);
     throw ApiError.badRequest(`Webhook signature verification failed: ${err.message}`);
   }
 };
 
-/**
- * Idempotently processes verified Stripe webhook events.
- *
- * @param {object} event - Verified Stripe event object
- * @returns {Promise<object>} Outcome summary
- */
+/** Handles verified Stripe events; only payment_intent.succeeded changes state. */
 const handleWebhookEvent = async (event) => {
-  const { type, data } = event;
-  const paymentIntent = data && data.object;
-  const orderId = paymentIntent && paymentIntent.metadata && paymentIntent.metadata.order_id;
-
-  logger.info(`[STRIPE WEBHOOK] Received event: ${type} for orderId: ${orderId}`);
-
-  // [EVENT: PAYMENT SUCCESSFUL]
-  if (type === 'payment_intent.succeeded') {
-    if (!orderId) {
-      logger.warn('[STRIPE WEBHOOK] PaymentIntent succeeded without metadata.order_id');
-      return { success: true, processed: false };
-    }
-
-    // Step 1: Transition Order status to 'paid' and 'processing'
-    await Order.update(
-      {
-        status: 'processing',
-        paymentIntentId: (paymentIntent && paymentIntent.id) || null,
-      },
-      { where: { id: orderId } }
-    );
-
-    // Step 2: [PERMANENT INVENTORY CONFIRMATION]:
-    // Convert 15-minute temporary reservation into a permanent warehouse stock deduction
-    try {
-      await reservationService.confirmReservation(orderId);
-    } catch (resErr) {
-      logger.warn(`[STRIPE WEBHOOK] Reservation confirmation skipped: ${resErr.message}`);
-    }
-
-    logger.info(`[STRIPE WEBHOOK] Order ${orderId} successfully marked as PAID`);
-    return { success: true, order_id: orderId, status: 'paid' };
+  const intent = event?.data?.object;
+  const orderId = intent?.metadata?.order_id;
+  if (event?.type !== 'payment_intent.succeeded') {
+    return { success: true, processed: false, ignoredEvent: event?.type };
+  }
+  if (!orderId) {
+    logger.warn('[STRIPE WEBHOOK] payment_intent.succeeded without metadata.order_id');
+    return { success: true, processed: false };
   }
 
-  return { success: true, processed: false, ignoredEvent: type };
+  const order = await Order.findByPk(orderId);
+  if (!order) return { success: true, processed: false };
+  if (intent.amount !== toMinorUnits(order.totalAmount)) {
+    logger.error(`[STRIPE WEBHOOK] Amount mismatch for order ${orderId}`);
+    return { success: true, processed: false };
+  }
+  const result = await markOrderPaid(order, intent.id);
+  return { success: true, processed: true, ...result };
 };
 
 module.exports = {
+  getProvider,
+  toMinorUnits,
   createPaymentIntent,
+  confirmOrderPayment,
+  markOrderPaid,
   constructWebhookEvent,
   handleWebhookEvent,
+  MOCK_PROVIDER,
+  STRIPE_PROVIDER,
 };

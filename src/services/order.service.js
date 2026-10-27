@@ -1,6 +1,5 @@
 const { Order, OrderItem, ProductVariant, Product, Customer } = require('../models');
 const ApiError = require('../utils/ApiError');
-const logger = require('../config/logger');
 
 /**
  * Generates an immutable, human-readable tax invoice identifier.
@@ -312,51 +311,10 @@ const getOrderTracking = async (orderId, customerId = null, guestToken = null) =
   };
 };
 
-/**
- * Atomically finalizes an order upon successful payment capture.
- * Transitions order status to 'processing' and records payment intent.
- *
- * @param {number|string} orderId
- * @param {object} paymentDetails
- * @returns {Promise<object>}
- */
-const finalizeOrder = async (orderId, paymentDetails = {}) => {
-  if (!orderId) {
-    throw ApiError.badRequest('order_id is required to finalize order');
-  }
-
-  const order = await Order.findByPk(orderId, {
-    include: [{ model: OrderItem, as: 'items' }],
-  });
-
-  if (!order) {
-    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
-  }
-
-  const paymentIntentId =
-    paymentDetails.payment_intent_id || paymentDetails.id || `pi_${Date.now()}`;
-
-  await order.update({
-    status: 'processing',
-    paymentIntentId,
-  });
-
-  logger.info(`[ORDER] Order #${order.id} finalized with payment intent ${paymentIntentId}`);
-
-  return {
-    success: true,
-    order_id: order.id,
-    status: order.status,
-    payment_intent_id: paymentIntentId,
-    finalized_at: new Date().toISOString(),
-  };
-};
-
 module.exports = {
   getOrderById,
   getCustomerOrders,
   getOrderTracking,
-  finalizeOrder,
   generateInvoiceNumber,
   canReadOrder,
   toOrderLine,
