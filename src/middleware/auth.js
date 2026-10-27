@@ -1,6 +1,14 @@
 const AppError = require('../utils/AppError');
 const { verifyAccessToken } = require('../utils/tokenGenerator');
 
+/**
+ * Access tokens carry the subject as `userId` (see tokenGenerator). Older code paths read
+ * `req.user.id`, so both are exposed from one place instead of patching every consumer.
+ */
+function toRequestUser(payload) {
+  return { ...payload, id: payload.userId ?? payload.id ?? payload.sub };
+}
+
 function readBearer(req) {
   const header = req.headers.authorization;
   return header && header.startsWith('Bearer ') ? header.split(' ')[1] : null;
@@ -13,7 +21,7 @@ function auth(req, res, next) {
   }
 
   try {
-    req.user = verifyAccessToken(token);
+    req.user = toRequestUser(verifyAccessToken(token));
     return next();
   } catch (err) {
     if (
@@ -35,7 +43,7 @@ function optionalAuth(req, res, next) {
   req.user = null;
   if (token) {
     try {
-      req.user = verifyAccessToken(token);
+      req.user = toRequestUser(verifyAccessToken(token));
     } catch (err) {
       req.user = null;
     }
@@ -43,4 +51,4 @@ function optionalAuth(req, res, next) {
   return next();
 }
 
-module.exports = { auth, optionalAuth };
+module.exports = { auth, optionalAuth, toRequestUser };
