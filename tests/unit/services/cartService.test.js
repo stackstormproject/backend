@@ -2,6 +2,7 @@ jest.mock('../../../src/models', () => ({
   Cart: { findOrCreate: jest.fn(), findOne: jest.fn() },
   CartItem: { findOne: jest.fn(), findAll: jest.fn(), create: jest.fn() },
   ProductVariant: { findByPk: jest.fn() },
+  Product: {},
   sequelize: {
     transaction: jest.fn().mockResolvedValue({
       commit: jest.fn(),
@@ -69,11 +70,40 @@ describe('cartService', () => {
       expect(await cartService.getCart(OWNER)).toEqual([]);
     });
 
-    it('should return the items given a cart exists', async () => {
+    it('should return priced lines with product details given a cart exists', async () => {
       Cart.findOne.mockResolvedValue({ id: 1 });
-      CartItem.findAll.mockResolvedValue([{ id: 1 }]);
+      const row = {
+        id: 4,
+        productVariantId: 7,
+        quantity: 2,
+        variant: {
+          sku: 'BAT-M',
+          size: 'M',
+          color: 'Blue',
+          stockQuantity: 5,
+          reservedQuantity: 1,
+          additionalPrice: '250.00',
+          product: { id: 3, name: 'Batik Shirt', slug: 'batik-shirt', price: '4500.00' },
+        },
+      };
+      CartItem.findAll.mockResolvedValue([{ get: () => row }]);
 
-      expect(await cartService.getCart(OWNER)).toHaveLength(1);
+      const [line] = await cartService.getCart(OWNER);
+
+      expect(line).toMatchObject({
+        id: 4,
+        variant_id: 7,
+        unit_price: 4750,
+        line_total: 9500,
+        available_stock: 4,
+        product: { name: 'Batik Shirt', slug: 'batik-shirt' },
+      });
+    });
+
+    it('should default missing variant data to safe values', () => {
+      const line = cartService.toCartLine({ get: () => ({ id: 1, quantity: 1 }) });
+
+      expect(line).toMatchObject({ unit_price: 0, available_stock: 0, product: { name: null } });
     });
   });
 
