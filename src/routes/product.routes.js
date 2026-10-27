@@ -2,6 +2,7 @@ const { Router } = require('express');
 const productController = require('../controllers/product.controller');
 const { auth } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
+const { MANAGER_ROLES } = require('../config/constants');
 
 const reviewController = require('../controllers/review.controller');
 
@@ -18,18 +19,8 @@ router.post('/:id/reviews', auth, reviewController.createReview);
 router.get('/:slug', productController.getProductBySlug);
 
 // Admin-guarded mutations with automatic cache eviction
-router.post(
-  '/',
-  auth,
-  rbac(['admin', 'super_admin', 'inventory_manager']),
-  productController.createProduct
-);
-router.put(
-  '/:id',
-  auth,
-  rbac(['admin', 'super_admin', 'inventory_manager']),
-  productController.updateProduct
-);
-router.delete('/:id', auth, rbac(['admin', 'super_admin']), productController.deleteProduct);
+router.post('/', auth, rbac(MANAGER_ROLES), productController.createProduct);
+router.put('/:id', auth, rbac(MANAGER_ROLES), productController.updateProduct);
+router.delete('/:id', auth, rbac(MANAGER_ROLES), productController.deleteProduct);
 
 module.exports = router;
