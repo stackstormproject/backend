@@ -366,6 +366,10 @@ async function seedCategoriesAndProducts() {
 module.exports = seedCategoriesAndProducts;
 module.exports.variantSpecsFor = variantSpecsFor;
 module.exports.toCategoryAttributes = toCategoryAttributes;
+// Also a Sequelize seeder, so `npm run db:seed` runs it after the demo accounts. Re-running
+// it is safe: categories and products are upserted and variants are found or created.
+module.exports.up = () => seedCategoriesAndProducts();
+module.exports.down = async () => {};
 
 if (require.main === module) {
   seedCategoriesAndProducts()
