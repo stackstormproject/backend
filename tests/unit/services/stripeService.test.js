@@ -1,11 +1,13 @@
 const mockCreate = jest.fn();
 const mockRetrieve = jest.fn();
 const mockConstructEvent = jest.fn();
+const mockRefundCreate = jest.fn();
 
 jest.mock('stripe', () =>
   jest.fn().mockImplementation(() => ({
     paymentIntents: { create: mockCreate, retrieve: mockRetrieve },
     webhooks: { constructEvent: mockConstructEvent },
+    refunds: { create: mockRefundCreate },
   }))
 );
 
@@ -311,6 +313,47 @@ describe('stripeService', () => {
 
       expect(result).toMatchObject({ processed: true, status: 'processing' });
       expect(order.paymentIntentId).toBe('pi_1');
+    });
+  });
+
+  describe('refundOrderPayment', () => {
+    beforeEach(() => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+      mockRefundCreate.mockResolvedValue({ id: 're_1' });
+    });
+
+    it('should do nothing for an order that was never paid', async () => {
+      await expect(stripeService.refundOrderPayment(makeOrder())).resolves.toEqual({
+        refunded: false,
+      });
+      await expect(
+        stripeService.refundOrderPayment(makeOrder({ paymentIntentId: 'pi_1' }), 0)
+      ).resolves.toEqual({ refunded: false });
+    });
+
+    it('should record a mock refund without calling Stripe', async () => {
+      const result = await stripeService.refundOrderPayment(
+        makeOrder({ paymentIntentId: 'mock_pi_10' }),
+        3000
+      );
+
+      expect(result).toMatchObject({ refunded: true, provider: 'mock', amount: 3000 });
+      expect(mockRefundCreate).not.toHaveBeenCalled();
+    });
+
+    it('should use the caller key so two same-amount item refunds stay separate', async () => {
+      const order = makeOrder({ paymentIntentId: 'pi_1' });
+
+      await stripeService.refundOrderPayment(order, 3000, 'return-41');
+      await stripeService.refundOrderPayment(order, 3000, 'return-42');
+      await stripeService.refundOrderPayment(order);
+
+      expect(mockRefundCreate.mock.calls.map((c) => c[1].idempotencyKey)).toEqual([
+        'return-41',
+        'return-42',
+        'refund-10-885000',
+      ]);
+      expect(mockRefundCreate.mock.calls[0][0]).toEqual({ payment_intent: 'pi_1', amount: 300000 });
     });
   });
 });
