@@ -83,6 +83,7 @@ describe('listOrders', () => {
       is_guest: false,
       items_count: 3,
       total_amount: 4650,
+      allowed_statuses: ['shipped', 'cancelled'],
     });
     expect(result.orders[1]).toMatchObject({
       customer_name: 'Guest',

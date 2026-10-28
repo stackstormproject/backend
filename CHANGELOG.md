@@ -21,6 +21,8 @@ All notable changes to this project are documented in this file.
   (or the storefront's test gateway without a Stripe key) and `POST /payments/confirm-session`
   verifies the session when they come back; the webhook also accepts
   `checkout.session.completed` (#180)
+- Admin order list rows include `allowed_statuses`, so staff can change a status from the list
+  (#181)
 
 ### Changed
 

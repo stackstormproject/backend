@@ -79,6 +79,7 @@ describe('Admin order management', () => {
     expect(list.body.data.orders[0]).toMatchObject({
       items_count: 2,
       customer_email: expect.stringContaining('@'),
+      allowed_statuses: ['shipped', 'cancelled'], // #181
     });
     expect(detail.body.data.items).toHaveLength(1);
     expect(detail.body.data.allowed_statuses).toEqual(['shipped', 'cancelled']);
@@ -95,6 +96,7 @@ describe('Admin order management', () => {
       .set('Authorization', adminBearer);
 
     expect(pending.body.data.orders.every((o) => o.status === 'payment_pending')).toBe(true);
+    expect(pending.body.data.orders[0].allowed_statuses).toEqual(['cancelled']);
     expect(bad.status).toBe(400);
   });
 
