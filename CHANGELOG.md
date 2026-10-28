@@ -15,6 +15,8 @@ All notable changes to this project are documented in this file.
   without S3 they are stored on the backend's disk and served under `/api/v1/media` (#172)
 - Home page sections chosen by staff (new arrivals, popular) and brands with logos for
   "Our brands"; products can be listed by section or brand (#173)
+- PDF invoice for paid orders: `GET /orders/:id/invoice` for the customer (or guest token)
+  and `GET /admin/orders/:id/invoice` for managers (#174)
 
 ### Changed
 
