@@ -13,6 +13,7 @@ const logger = require('../config/logger');
 // Business Rule Constants
 const FREE_SHIPPING_THRESHOLD_LKR = 10000.0; // 10,000 LKR
 const STANDARD_SHIPPING_FEE_LKR = 450.0; // 450 LKR flat rate
+const SHIPPING_METHODS = ['standard', 'pickup'];
 
 /**
  * Validates Sri Lankan shipping destination address attributes.
@@ -113,7 +114,14 @@ const initiateCheckout = async (checkoutData = {}) => {
   const rawItems = checkoutData.items || [];
   const rawAddress = checkoutData.shippingAddress || checkoutData.shipping_address;
   const rawBillingAddress = checkoutData.billingAddress || checkoutData.billing_address;
-  const shippingMethod = checkoutData.shippingMethod || checkoutData.shippingOption || 'standard';
+  const shippingMethod =
+    checkoutData.shippingMethod ||
+    checkoutData.shipping_method ||
+    checkoutData.shippingOption ||
+    'standard';
+  if (!SHIPPING_METHODS.includes(shippingMethod)) {
+    throw ApiError.badRequest(`Shipping method must be one of: ${SHIPPING_METHODS.join(', ')}`);
+  }
   const notes = checkoutData.notes || null;
 
   // 1. Identity validation: Guests must provide a valid email
@@ -167,9 +175,16 @@ const initiateCheckout = async (checkoutData = {}) => {
     }
 
     const prod = dbVariant.product || {};
-    const rawPrice =
-      dbVariant.price_override ?? dbVariant.additionalPrice ?? prod.price ?? prod.base_price ?? 0;
-    const unitPrice = Number(rawPrice);
+    if (prod.isActive === false) {
+      throw ApiError.conflict(`'${prod.name}' is no longer sold. Remove it from your bag.`);
+    }
+    // Product price plus the variant surcharge (e.g. XXL). Never trust a client-sent price.
+    const unitPrice = Number(
+      (Number(prod.price || 0) + Number(dbVariant.additionalPrice || 0)).toFixed(2)
+    );
+    if (!(unitPrice > 0)) {
+      throw ApiError.badRequest(`Variant '${dbVariant.sku}' has no valid price`);
+    }
     const lineTotal = Number((unitPrice * reqItem.quantity).toFixed(2));
     subtotal += lineTotal;
 
@@ -181,7 +196,9 @@ const initiateCheckout = async (checkoutData = {}) => {
       unit_price: unitPrice,
       subtotal: lineTotal,
       total_price: lineTotal,
-      title: prod.name || prod.title || 'Apparel Item',
+      title: prod.name || 'Apparel Item',
+      product_id: prod.id || null,
+      slug: prod.slug || null,
       sku: dbVariant.sku,
       size: dbVariant.size,
       color: dbVariant.color,
@@ -226,20 +243,29 @@ const initiateCheckout = async (checkoutData = {}) => {
 
     const lineItemsPayload = resolvedItems.map((item) => ({
       orderId: orderRecord.id,
-      variantId: item.variantId,
+      productVariantId: item.variantId,
       quantity: item.quantity,
       unitPrice: item.unitPrice,
       subtotal: item.subtotal,
     }));
 
     await OrderItem.bulkCreate(lineItemsPayload, { transaction: t });
+    // Link the stock hold to its order so payment success can confirm it by order id.
+    await sequelize.query('UPDATE stock_reservations SET order_id = :orderId WHERE id = :id', {
+      replacements: { orderId: orderRecord.id, id: reservationId },
+      transaction: t,
+    });
     return orderRecord;
   };
 
-  if (sequelize && typeof sequelize.transaction === 'function') {
+  try {
     createdOrder = await sequelize.transaction(createOrderAction);
-  } else {
-    createdOrder = await createOrderAction(null);
+  } catch (err) {
+    // Do not leave stock held for 15 minutes by an order that was never created.
+    await reservationService.releaseReservation(reservationId).catch((releaseErr) => {
+      logger.error(`[CHECKOUT] Could not release ${reservationId}: ${releaseErr.message}`);
+    });
+    throw err;
   }
 
   logger.info(
@@ -283,4 +309,5 @@ module.exports = {
   initiateCheckout,
   FREE_SHIPPING_THRESHOLD_LKR,
   STANDARD_SHIPPING_FEE_LKR,
+  SHIPPING_METHODS,
 };

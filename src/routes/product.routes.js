@@ -1,7 +1,6 @@
 const { Router } = require('express');
 const productController = require('../controllers/product.controller');
 const { auth } = require('../middleware/auth');
-const { rbac } = require('../middleware/rbac');
 
 const reviewController = require('../controllers/review.controller');
 
@@ -17,19 +16,6 @@ router.post('/:id/reviews', auth, reviewController.createReview);
 // Public PDP detail lookup by SEO slug or ID
 router.get('/:slug', productController.getProductBySlug);
 
-// Admin-guarded mutations with automatic cache eviction
-router.post(
-  '/',
-  auth,
-  rbac(['admin', 'super_admin', 'inventory_manager']),
-  productController.createProduct
-);
-router.put(
-  '/:id',
-  auth,
-  rbac(['admin', 'super_admin', 'inventory_manager']),
-  productController.updateProduct
-);
-router.delete('/:id', auth, rbac(['admin', 'super_admin']), productController.deleteProduct);
+// Product writes live under /admin/products (admin.routes.js).
 
 module.exports = router;

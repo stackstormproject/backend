@@ -26,7 +26,30 @@ Node.js 20, Express 4, Sequelize 6, PostgreSQL 17, Redis 7, Jest and Supertest.
 2. `npm install`
 3. Copy `.env.example` to `.env` and fill in the values
 4. Start the databases from the infra repo: `docker compose up -d`
-5. `npm run dev` (works once the server entry point is added)
+5. `npx sequelize-cli db:migrate` then `npm run db:seed`
+6. `npm run dev` (API on http://localhost:5000/api/v1)
+
+The seed creates two staff accounts, both with the password in `SEED_ADMIN_PASSWORD`:
+`admin@stackstorm.lk` (super_admin) and `support@stackstorm.lk` (support_agent).
+
+## Admin API
+
+All routes are under `/api/v1/admin` and need a staff access token
+(`POST /auth/admin/login`). Managers are `super_admin` and `admin`; support agents only reach
+the support routes.
+
+| Area      | Routes                                                                                        | Roles     |
+| --------- | --------------------------------------------------------------------------------------------- | --------- |
+| Analytics | `GET analytics`, `GET analytics/sales-trend?days=`                                            | Managers  |
+| Orders    | `GET orders`, `GET orders/:id`, `PATCH orders/:id/status`                                     | Managers  |
+| Products  | `GET/POST products`, `GET/PUT/DELETE products/:id`, `POST/PATCH/DELETE products/:id/variants` | Managers  |
+| Stock     | `GET inventory`, `POST inventory/:variantId/adjust`, `GET inventory/:variantId/logs`          | Managers  |
+| Returns   | `GET returns`, `GET returns/:id`, `POST returns/:id/approve\|reject\|receive`                 | Managers  |
+| Customers | `GET customers`, `GET customers/:id`, `POST customers/:id/loyalty-adjustments`                | Managers  |
+| Support   | `GET support/sessions`, `PATCH support/sessions/:id/status`                                   | All staff |
+
+Socket.IO: staff sockets authenticate with the access token (`auth.token`); agent status
+comes from the token's role only.
 
 ## Scripts
 

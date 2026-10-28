@@ -1,215 +1,359 @@
-const mockPaymentIntentsCreate = jest.fn();
-const mockWebhooksConstructEvent = jest.fn();
+const mockCreate = jest.fn();
+const mockRetrieve = jest.fn();
+const mockConstructEvent = jest.fn();
+const mockRefundCreate = jest.fn();
 
 jest.mock('stripe', () =>
   jest.fn().mockImplementation(() => ({
-    paymentIntents: {
-      create: mockPaymentIntentsCreate,
-    },
-    webhooks: {
-      constructEvent: mockWebhooksConstructEvent,
-    },
+    paymentIntents: { create: mockCreate, retrieve: mockRetrieve },
+    webhooks: { constructEvent: mockConstructEvent },
+    refunds: { create: mockRefundCreate },
   }))
 );
 
 jest.mock('../../../src/models', () => ({
-  Order: {
-    findByPk: jest.fn(),
-    update: jest.fn(),
-  },
-  Payment: {
-    findOrCreate: jest.fn(),
-  },
+  Order: { findByPk: jest.fn() },
+  sequelize: { query: jest.fn() },
 }));
 
 jest.mock('../../../src/services/reservation.service', () => ({
   confirmReservation: jest.fn(),
 }));
 
-const { Order, Payment } = require('../../../src/models');
+const { Order, sequelize } = require('../../../src/models');
 const reservationService = require('../../../src/services/reservation.service');
 const stripeService = require('../../../src/services/stripe.service');
-const ApiError = require('../../../src/utils/ApiError');
+
+const REAL_KEY = 'sk_test_51RealLookingKey';
+
+const makeOrder = (overrides = {}) => {
+  const order = {
+    id: 10,
+    customerId: 4,
+    guestOrderToken: null,
+    status: 'payment_pending',
+    totalAmount: '8850.00',
+    paymentIntentId: null,
+    ...overrides,
+  };
+  order.update = jest.fn(async (patch) => Object.assign(order, patch));
+  return order;
+};
 
 describe('stripeService', () => {
+  const env = { ...process.env };
+
   beforeEach(() => {
     jest.clearAllMocks();
+    process.env = { ...env, NODE_ENV: 'test' };
+    delete process.env.STRIPE_SECRET_KEY;
+    sequelize.query.mockResolvedValue([{ id: 'res_1' }]);
+    reservationService.confirmReservation.mockResolvedValue(true);
+  });
+
+  afterAll(() => {
+    process.env = env;
+  });
+
+  describe('getProvider', () => {
+    it('should use the mock provider given no key outside production', () => {
+      expect(stripeService.getProvider()).toBe('mock');
+    });
+
+    it('should treat a placeholder key as not configured', () => {
+      process.env.STRIPE_SECRET_KEY = 'sk_test_xxx';
+      expect(stripeService.getProvider()).toBe('mock');
+    });
+
+    it('should use Stripe given a real key', () => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+      expect(stripeService.getProvider()).toBe('stripe');
+    });
+
+    it('should refuse to mock payments in production', () => {
+      process.env.NODE_ENV = 'production';
+      expect(() => stripeService.getProvider()).toThrow(/not configured/);
+    });
+  });
+
+  describe('toMinorUnits', () => {
+    it('should convert rupees to integer cents without float drift', () => {
+      expect(stripeService.toMinorUnits('8850.10')).toBe(885010);
+      expect(stripeService.toMinorUnits(0.1 + 0.2)).toBe(30);
+    });
   });
 
   describe('createPaymentIntent', () => {
-    it('should throw bad request if orderId is missing', async () => {
-      await expect(stripeService.createPaymentIntent(null)).rejects.toThrow(ApiError);
-    });
+    it('should return 404 given the caller does not own the order', async () => {
+      Order.findByPk.mockResolvedValue(makeOrder());
 
-    it('should throw not found if order does not exist in database', async () => {
-      Order.findByPk.mockResolvedValue(null);
-      await expect(stripeService.createPaymentIntent('ord_missing')).rejects.toMatchObject({
+      await expect(stripeService.createPaymentIntent(10, { customerId: 5 })).rejects.toMatchObject({
         statusCode: 404,
       });
     });
 
-    it('should calculate integer cents, create Stripe intent, and persist Payment record', async () => {
-      const mockOrder = {
-        id: 101,
-        order_number: 'DFC-20261023-1234',
-        total_amount: '10450.00',
-      };
+    it('should return 409 given the order is already paid', async () => {
+      Order.findByPk.mockResolvedValue(makeOrder({ status: 'processing' }));
 
-      Order.findByPk.mockResolvedValue(mockOrder);
-      mockPaymentIntentsCreate.mockResolvedValue({
-        id: 'pi_test_intent_999',
-        client_secret: 'pi_test_intent_999_secret_abc',
+      await expect(stripeService.createPaymentIntent(10, { customerId: 4 })).rejects.toMatchObject({
+        statusCode: 409,
+      });
+    });
+
+    it('should issue a mock intent and store its id given no Stripe key', async () => {
+      const order = makeOrder();
+      Order.findByPk.mockResolvedValue(order);
+
+      const result = await stripeService.createPaymentIntent(10, { customerId: 4 });
+
+      expect(result).toMatchObject({ provider: 'mock', amount: 8850, currency: 'LKR' });
+      expect(order.paymentIntentId).toBe(result.paymentIntentId);
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('should create a Stripe intent for the stored total given a real key', async () => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+      const order = makeOrder();
+      Order.findByPk.mockResolvedValue(order);
+      mockCreate.mockResolvedValue({ id: 'pi_1', client_secret: 'pi_1_secret' });
+
+      const result = await stripeService.createPaymentIntent(10, { customerId: 4 });
+
+      expect(mockCreate).toHaveBeenCalledWith(
+        expect.objectContaining({ amount: 885000, currency: 'lkr', metadata: { order_id: '10' } }),
+        { idempotencyKey: 'order-10-885000' }
+      );
+      expect(result).toMatchObject({ provider: 'stripe', clientSecret: 'pi_1_secret' });
+      expect(order.paymentIntentId).toBe('pi_1');
+    });
+
+    it('should reuse an existing open intent instead of creating another', async () => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'pi_9' }));
+      mockRetrieve.mockResolvedValue({
+        id: 'pi_9',
         status: 'requires_payment_method',
-      });
-      Payment.findOrCreate.mockResolvedValue([{}, true]);
-
-      const result = await stripeService.createPaymentIntent(101);
-
-      expect(mockPaymentIntentsCreate).toHaveBeenCalledWith({
-        amount: 1045000,
-        currency: 'lkr',
-        metadata: {
-          order_id: '101',
-          order_number: 'DFC-20261023-1234',
-        },
-        payment_method_types: ['card'],
+        client_secret: 's',
       });
 
-      expect(Payment.findOrCreate).toHaveBeenCalledWith({
-        where: { order_id: 101 },
-        defaults: expect.objectContaining({
-          payment_method: 'stripe',
-          payment_intent_id: 'pi_test_intent_999',
-          amount: 10450,
-          currency: 'LKR',
-          status: 'pending',
-        }),
-      });
+      await stripeService.createPaymentIntent(10, { customerId: 4 });
 
-      expect(result).toEqual({
-        clientSecret: 'pi_test_intent_999_secret_abc',
-        paymentIntentId: 'pi_test_intent_999',
-        orderId: 101,
-        amount: 10450,
-        currency: 'LKR',
+      expect(mockCreate).not.toHaveBeenCalled();
+    });
+
+    it('should allow a guest with the matching guest token', async () => {
+      Order.findByPk.mockResolvedValue(makeOrder({ customerId: null, guestOrderToken: 'tok' }));
+
+      await expect(
+        stripeService.createPaymentIntent(10, { guestToken: 'tok' })
+      ).resolves.toMatchObject({ provider: 'mock' });
+    });
+  });
+
+  describe('confirmOrderPayment', () => {
+    it('should reject an intent id that does not belong to the order', async () => {
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'pi_real' }));
+
+      await expect(
+        stripeService.confirmOrderPayment(10, { customerId: 4 }, 'pi_forged')
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('should return 402 given Stripe says the intent has not succeeded', async () => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'pi_1' }));
+      mockRetrieve.mockResolvedValue({
         status: 'requires_payment_method',
+        amount: 885000,
+        metadata: { order_id: '10' },
       });
+
+      await expect(
+        stripeService.confirmOrderPayment(10, { customerId: 4 }, 'pi_1')
+      ).rejects.toMatchObject({ statusCode: 402 });
+    });
+
+    it('should return 402 given the paid amount differs from the order total', async () => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'pi_1' }));
+      mockRetrieve.mockResolvedValue({
+        status: 'succeeded',
+        amount: 100,
+        metadata: { order_id: '10' },
+      });
+
+      await expect(
+        stripeService.confirmOrderPayment(10, { customerId: 4 }, 'pi_1')
+      ).rejects.toMatchObject({ statusCode: 402 });
+    });
+
+    it('should mark the order paid and confirm its reservation given a verified intent', async () => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+      const order = makeOrder({ paymentIntentId: 'pi_1' });
+      Order.findByPk.mockResolvedValue(order);
+      mockRetrieve.mockResolvedValue({
+        status: 'succeeded',
+        amount: 885000,
+        metadata: { order_id: '10' },
+      });
+
+      const result = await stripeService.confirmOrderPayment(10, { customerId: 4 }, 'pi_1');
+
+      expect(result).toEqual({ orderId: 10, status: 'processing' });
+      expect(reservationService.confirmReservation).toHaveBeenCalledWith('res_1');
+    });
+
+    it('should be idempotent given the order is already paid', async () => {
+      Order.findByPk.mockResolvedValue(makeOrder({ status: 'processing' }));
+
+      await expect(stripeService.confirmOrderPayment(10, { customerId: 4 })).resolves.toEqual({
+        orderId: 10,
+        status: 'processing',
+      });
+      expect(reservationService.confirmReservation).not.toHaveBeenCalled();
+    });
+
+    it('should still record payment given the reservation had already expired', async () => {
+      const order = makeOrder({ paymentIntentId: 'mock_pi_10' });
+      Order.findByPk.mockResolvedValue(order);
+      reservationService.confirmReservation.mockResolvedValue(false);
+
+      await stripeService.confirmOrderPayment(10, { customerId: 4 }, 'mock_pi_10');
+
+      expect(order.status).toBe('processing');
+    });
+
+    it('should reject paying a cancelled order', async () => {
+      Order.findByPk.mockResolvedValue(
+        makeOrder({ status: 'cancelled', paymentIntentId: 'mock_pi' })
+      );
+
+      await expect(
+        stripeService.confirmOrderPayment(10, { customerId: 4 }, 'mock_pi')
+      ).rejects.toMatchObject({ statusCode: 409 });
     });
   });
 
   describe('constructWebhookEvent', () => {
-    it('should throw bad request if signature is missing', () => {
-      expect(() => stripeService.constructWebhookEvent(Buffer.from('payload'), null)).toThrow(
-        ApiError
+    beforeEach(() => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+    });
+
+    it('should throw given no signature', () => {
+      expect(() => stripeService.constructWebhookEvent(Buffer.from('{}'), null)).toThrow(
+        /Signature/
       );
     });
 
-    it('should throw bad request if payload is missing', () => {
-      expect(() => stripeService.constructWebhookEvent(null, 'sig_header')).toThrow(ApiError);
+    it('should throw given no payload', () => {
+      expect(() => stripeService.constructWebhookEvent(null, 'sig')).toThrow(/payload/);
     });
 
-    it('should return parsed event when signature verification succeeds', () => {
-      const mockEvent = { id: 'evt_123', type: 'payment_intent.succeeded' };
-      mockWebhooksConstructEvent.mockReturnValue(mockEvent);
+    it('should return the verified event', () => {
+      mockConstructEvent.mockReturnValue({ type: 'x' });
 
-      const result = stripeService.constructWebhookEvent(Buffer.from('payload'), 'sig_header');
-      expect(result).toBe(mockEvent);
+      expect(stripeService.constructWebhookEvent(Buffer.from('{}'), 'sig')).toEqual({ type: 'x' });
     });
 
-    it('should throw bad request if signature verification throws an error', () => {
-      mockWebhooksConstructEvent.mockImplementation(() => {
-        throw new Error('Invalid signature');
+    it('should wrap a verification failure as 400', () => {
+      mockConstructEvent.mockImplementation(() => {
+        throw new Error('bad sig');
       });
 
-      expect(() =>
-        stripeService.constructWebhookEvent(Buffer.from('payload'), 'sig_header')
-      ).toThrow(ApiError);
+      expect(() => stripeService.constructWebhookEvent(Buffer.from('{}'), 'sig')).toThrow(
+        /verification failed/
+      );
     });
   });
 
   describe('handleWebhookEvent', () => {
-    it('should finalize order and confirm reservation given payment_intent.succeeded', async () => {
-      const event = {
-        type: 'payment_intent.succeeded',
-        data: {
-          object: {
-            id: 'pi_test_success',
-            metadata: {
-              order_id: '500',
-            },
-          },
-        },
-      };
-
-      Order.update.mockResolvedValue([1]);
-      reservationService.confirmReservation.mockResolvedValue(true);
-
-      const result = await stripeService.handleWebhookEvent(event);
-
-      expect(Order.update).toHaveBeenCalledWith(
-        { status: 'processing', paymentIntentId: 'pi_test_success' },
-        { where: { id: '500' } }
-      );
-      expect(reservationService.confirmReservation).toHaveBeenCalledWith('500');
-      expect(result).toEqual({
-        success: true,
-        order_id: '500',
-        status: 'paid',
-      });
+    const succeeded = (amount = 885000) => ({
+      type: 'payment_intent.succeeded',
+      data: { object: { id: 'pi_1', amount, metadata: { order_id: '10' } } },
     });
 
-    it('should handle reservation confirmation error gracefully without failing webhook', async () => {
-      const event = {
-        type: 'payment_intent.succeeded',
-        data: {
-          object: {
-            id: 'pi_test_success',
-            metadata: {
-              order_id: '501',
-            },
-          },
-        },
-      };
-
-      Order.update.mockResolvedValue([1]);
-      reservationService.confirmReservation.mockRejectedValue(new Error('Already confirmed'));
-
-      const result = await stripeService.handleWebhookEvent(event);
-
-      expect(result).toEqual({
-        success: true,
-        order_id: '501',
-        status: 'paid',
-      });
-    });
-
-    it('should return un-processed success given payment_intent.succeeded without order_id', async () => {
-      const event = {
-        type: 'payment_intent.succeeded',
-        data: {
-          object: {
-            id: 'pi_test_no_meta',
-            metadata: {},
-          },
-        },
-      };
-
-      const result = await stripeService.handleWebhookEvent(event);
-      expect(result).toEqual({ success: true, processed: false });
-    });
-
-    it('should ignore non-payment_intent.succeeded events', async () => {
-      const event = {
-        type: 'customer.created',
-        data: { object: {} },
-      };
-
-      const result = await stripeService.handleWebhookEvent(event);
-      expect(result).toEqual({
-        success: true,
+    it('should ignore other event types', async () => {
+      await expect(
+        stripeService.handleWebhookEvent({ type: 'charge.refunded' })
+      ).resolves.toMatchObject({
         processed: false,
-        ignoredEvent: 'customer.created',
       });
+    });
+
+    it('should ignore a success without an order id', async () => {
+      const result = await stripeService.handleWebhookEvent({
+        type: 'payment_intent.succeeded',
+        data: { object: { metadata: {} } },
+      });
+
+      expect(result.processed).toBe(false);
+    });
+
+    it('should ignore an unknown order', async () => {
+      Order.findByPk.mockResolvedValue(null);
+
+      expect((await stripeService.handleWebhookEvent(succeeded())).processed).toBe(false);
+    });
+
+    it('should not mark paid given an amount mismatch', async () => {
+      const order = makeOrder();
+      Order.findByPk.mockResolvedValue(order);
+
+      const result = await stripeService.handleWebhookEvent(succeeded(1));
+
+      expect(result.processed).toBe(false);
+      expect(order.update).not.toHaveBeenCalled();
+    });
+
+    it('should mark the order paid given a matching success', async () => {
+      const order = makeOrder();
+      Order.findByPk.mockResolvedValue(order);
+
+      const result = await stripeService.handleWebhookEvent(succeeded());
+
+      expect(result).toMatchObject({ processed: true, status: 'processing' });
+      expect(order.paymentIntentId).toBe('pi_1');
+    });
+  });
+
+  describe('refundOrderPayment', () => {
+    beforeEach(() => {
+      process.env.STRIPE_SECRET_KEY = REAL_KEY;
+      mockRefundCreate.mockResolvedValue({ id: 're_1' });
+    });
+
+    it('should do nothing for an order that was never paid', async () => {
+      await expect(stripeService.refundOrderPayment(makeOrder())).resolves.toEqual({
+        refunded: false,
+      });
+      await expect(
+        stripeService.refundOrderPayment(makeOrder({ paymentIntentId: 'pi_1' }), 0)
+      ).resolves.toEqual({ refunded: false });
+    });
+
+    it('should record a mock refund without calling Stripe', async () => {
+      const result = await stripeService.refundOrderPayment(
+        makeOrder({ paymentIntentId: 'mock_pi_10' }),
+        3000
+      );
+
+      expect(result).toMatchObject({ refunded: true, provider: 'mock', amount: 3000 });
+      expect(mockRefundCreate).not.toHaveBeenCalled();
+    });
+
+    it('should use the caller key so two same-amount item refunds stay separate', async () => {
+      const order = makeOrder({ paymentIntentId: 'pi_1' });
+
+      await stripeService.refundOrderPayment(order, 3000, 'return-41');
+      await stripeService.refundOrderPayment(order, 3000, 'return-42');
+      await stripeService.refundOrderPayment(order);
+
+      expect(mockRefundCreate.mock.calls.map((c) => c[1].idempotencyKey)).toEqual([
+        'return-41',
+        'return-42',
+        'refund-10-885000',
+      ]);
+      expect(mockRefundCreate.mock.calls[0][0]).toEqual({ payment_intent: 'pi_1', amount: 300000 });
     });
   });
 });

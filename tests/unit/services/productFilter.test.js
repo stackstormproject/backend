@@ -1,3 +1,4 @@
+const { Op } = require('sequelize');
 const { listProducts } = require('../../../src/services/product.service');
 const { Product, Category } = require('../../../src/models');
 
@@ -117,7 +118,8 @@ describe('productFilter Service - Multi-Faceted Query Builder & Pagination', () 
       await listProducts({ categoryId: 'undefined' });
 
       expect(spy).toHaveBeenCalledTimes(3);
-      expect(spy.mock.calls[0][0].where).toEqual({});
+      // Only the archived-products filter (#136) remains when no category applies.
+      expect(spy.mock.calls[0][0].where).toEqual({ [Op.and]: [{ isActive: true }] });
     });
 
     it('should handle numeric categoryId with child categories and handle error gracefully', async () => {

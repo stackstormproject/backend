@@ -23,7 +23,6 @@ const {
   getOrderById,
   getCustomerOrders,
   getOrderTracking,
-  finalizeOrder,
   generateInvoiceNumber,
 } = require('../../../src/services/order.service');
 
@@ -60,7 +59,7 @@ describe('orderService', () => {
       await expect(getOrderById(10, 99)).rejects.toThrow(ApiError);
     });
 
-    it('throws forbidden if guest token does not match', async () => {
+    it('throws not found if guest token does not match', async () => {
       Order.findByPk.mockResolvedValue({
         id: 15,
         customerId: null,
@@ -69,7 +68,7 @@ describe('orderService', () => {
       });
 
       await expect(getOrderById(15, null, 'wrong_token')).rejects.toMatchObject({
-        statusCode: 403,
+        statusCode: 404,
       });
     });
 
@@ -108,7 +107,7 @@ describe('orderService', () => {
             variant: {
               sku: 'BATIK-BLU-M',
               size: 'M',
-              product: { title: 'Batik Shirt' },
+              product: { name: 'Batik Shirt', slug: 'batik-shirt' },
             },
           },
         ],
@@ -215,48 +214,27 @@ describe('orderService', () => {
     });
   });
 
-  describe('finalizeOrder', () => {
-    it('throws badRequest if orderId is missing', async () => {
-      await expect(finalizeOrder(null)).rejects.toMatchObject({ statusCode: 400 });
+  describe('canReadOrder', () => {
+    const { canReadOrder } = require('../../../src/services/order.service');
+
+    it('should deny an anonymous caller a registered customer order', () => {
+      expect(canReadOrder({ customerId: 4 }, null, null)).toBe(false);
     });
 
-    it('throws notFound if order does not exist', async () => {
-      Order.findByPk.mockResolvedValue(null);
-      await expect(finalizeOrder(999)).rejects.toMatchObject({ statusCode: 404 });
+    it('should deny another customer', () => {
+      expect(canReadOrder({ customerId: 4 }, 5, null)).toBe(false);
     });
 
-    it('transitions order to processing and updates paymentIntentId', async () => {
-      const mockUpdate = jest.fn();
-      Order.findByPk.mockResolvedValue({
-        id: 10,
-        status: 'payment_pending',
-        update: mockUpdate,
-      });
-
-      const res = await finalizeOrder(10, { payment_intent_id: 'pi_test_999' });
-      expect(mockUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ status: 'processing', paymentIntentId: 'pi_test_999' })
-      );
-      expect(res.success).toBe(true);
+    it('should allow the owning customer', () => {
+      expect(canReadOrder({ customerId: 4 }, '4', null)).toBe(true);
     });
 
-    it('supports fallback paymentDetails.id or generates fallback payment intent id', async () => {
-      const mockUpdate = jest.fn();
-      Order.findByPk.mockResolvedValue({
-        id: 10,
-        status: 'payment_pending',
-        update: mockUpdate,
-      });
+    it('should deny a guest order without its token', () => {
+      expect(canReadOrder({ customerId: null, guestOrderToken: 'abc' }, null, null)).toBe(false);
+    });
 
-      await finalizeOrder(10, { id: 'pi_via_id' });
-      expect(mockUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ paymentIntentId: 'pi_via_id' })
-      );
-
-      await finalizeOrder(10, {});
-      expect(mockUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ paymentIntentId: expect.stringMatching(/^pi_\d+$/) })
-      );
+    it('should allow a guest order with its token', () => {
+      expect(canReadOrder({ customerId: null, guestOrderToken: 'abc' }, null, 'abc')).toBe(true);
     });
   });
 });
