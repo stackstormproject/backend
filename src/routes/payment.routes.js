@@ -19,6 +19,20 @@ router.post('/create-intent', optionalAuth, paymentController.createPaymentInten
 router.post('/confirm', optionalAuth, paymentController.confirmPayment);
 
 /**
+ * @route   POST /payments/checkout-session
+ * @desc    Start payment on the hosted payment page; returns the URL to send the shopper to
+ * @access  Order owner: customer bearer token, or guest X-Guest-Token
+ */
+router.post('/checkout-session', optionalAuth, paymentController.createCheckoutSession);
+
+/**
+ * @route   POST /payments/confirm-session
+ * @desc    The shopper is back from the payment page: verify the session, mark the order paid
+ * @access  Order owner: customer bearer token, or guest X-Guest-Token
+ */
+router.post('/confirm-session', optionalAuth, paymentController.confirmCheckoutSession);
+
+/**
  * @route   POST /payments/webhook
  * @desc    Stripe webhook; body is the raw Buffer so the HMAC signature can be verified
  * @access  Public (Stripe servers, signature required)

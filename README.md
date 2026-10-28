@@ -39,6 +39,13 @@ The seed creates two staff accounts, both with the password in `SEED_ADMIN_PASSW
 Uploaded product images are saved in `uploads/` and served under `/api/v1/media` unless
 `STORAGE_DRIVER=s3` (or real AWS keys) is set.
 
+## Payments
+
+Checkout sends the shopper to Stripe Checkout and Stripe sends them back to
+`FRONTEND_URL/checkout/complete`, where the storefront asks `POST /payments/confirm-session` to
+verify the payment. Set `STRIPE_SECRET_KEY` (test keys work) and `FRONTEND_URL`. Without a
+Stripe key, outside production, the storefront's labelled test gateway is used instead.
+
 ## Shop sections and brands
 
 `GET /products?section=new_arrivals|popular` lists the products staff marked for the home page
