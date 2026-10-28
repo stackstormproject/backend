@@ -8,6 +8,7 @@ const {
   generateAccessToken,
   generateRefreshToken,
   getRefreshTtlMs,
+  hashToken,
 } = require('../utils/tokenGenerator');
 
 let dummyHash;
@@ -117,7 +118,79 @@ async function loginAdmin(email, password) {
   logger.info('Admin logged in', { adminId: admin.id, role: admin.role });
   return { admin: toPublicAdmin(admin), ...session };
 }
+const refreshFailed = (code, message) => new AppError(401, code, message);
+
+/**
+ * Rotates a refresh token (ADR-003): the presented token is marked used and a new pair is
+ * issued in one transaction. Presenting an already-used token signals theft, so every live
+ * session of that subject is revoked (REFRESH_TOKEN_REUSE).
+ */
+async function refreshSession(rawToken) {
+  if (!rawToken) throw refreshFailed('REFRESH_TOKEN_MISSING', 'No refresh token provided.');
+  const tokenHash = hashToken(rawToken);
+
+  const result = await sequelize.transaction(async (transaction) => {
+    const stored = await RefreshToken.findOne({
+      where: { tokenHash },
+      lock: transaction.LOCK.UPDATE,
+      transaction,
+    });
+    if (!stored || stored.revokedAt) {
+      throw refreshFailed('INVALID_REFRESH_TOKEN', 'Refresh token is not valid.');
+    }
+    const subjectWhere = stored.customerId
+      ? { customerId: stored.customerId }
+      : { adminId: stored.adminId };
+    if (stored.usedAt) {
+      await RefreshToken.update(
+        { revokedAt: new Date() },
+        { where: { ...subjectWhere, revokedAt: null }, transaction }
+      );
+      logger.warn('Refresh token reuse detected; all sessions revoked', subjectWhere);
+      // Returned, not thrown: throwing here would roll the revocation back.
+      return { reuseDetected: true };
+    }
+    if (stored.expiresAt < new Date()) {
+      throw refreshFailed('REFRESH_TOKEN_EXPIRED', 'Your session has expired. Please log in.');
+    }
+
+    const subjectType = stored.customerId ? 'customer' : 'admin';
+    const Model = stored.customerId ? Customer : Admin;
+    const subject = await Model.findByPk(stored.customerId || stored.adminId, { transaction });
+    if (!subject) throw refreshFailed('INVALID_REFRESH_TOKEN', 'Refresh token is not valid.');
+
+    await stored.update({ usedAt: new Date() }, { transaction });
+    const session = await issueSession(subject, subjectType, { transaction });
+    return subjectType === 'customer'
+      ? { customer: toPublicCustomer(subject), ...session }
+      : { admin: toPublicAdmin(subject), ...session };
+  });
+  if (result.reuseDetected) {
+    throw refreshFailed('REFRESH_TOKEN_REUSE', 'Session ended for security. Please log in.');
+  }
+  return result;
+}
+
+/** Revokes the presented refresh token. Unknown or missing tokens are a silent no-op. */
+async function revokeSession(rawToken) {
+  if (!rawToken) return;
+  await RefreshToken.update(
+    { revokedAt: new Date() },
+    { where: { tokenHash: hashToken(rawToken), revokedAt: null } }
+  );
+}
+
+/** Public profile for the signed-in admin (name and email for the admin app header). */
+async function getAdminProfile(adminId) {
+  const admin = await Admin.findByPk(adminId);
+  if (!admin) throw new AppError(401, 'INVALID_TOKEN', 'Admin account no longer exists.');
+  return toPublicAdmin(admin);
+}
+
 module.exports = {
+  getAdminProfile,
+  refreshSession,
+  revokeSession,
   loginAdmin,
   register,
   loginCustomer,

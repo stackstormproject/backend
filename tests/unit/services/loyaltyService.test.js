@@ -15,7 +15,7 @@ jest.mock('../../../src/models', () => {
       update: jest.fn(),
     },
     sequelize: {
-      transaction: jest.fn(async (cb) => cb({})),
+      transaction: jest.fn(async (cb) => cb({ LOCK: { UPDATE: 'UPDATE' } })),
     },
   };
 });
@@ -133,6 +133,8 @@ describe('loyaltyService', () => {
       expect(res.redeemed_points).toBe(150);
       expect(res.new_balance).toBe(50);
       expect(mockUpdate).toHaveBeenCalledWith({ currentPoints: 50 }, expect.anything());
+      // The balance row is locked, so concurrent redemptions cannot double-spend.
+      expect(Loyalty.findOne).toHaveBeenCalledWith(expect.objectContaining({ lock: 'UPDATE' }));
     });
   });
 });
