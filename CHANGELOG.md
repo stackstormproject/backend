@@ -20,6 +20,11 @@ All notable changes to this project are documented in this file.
 - Support sessions name the agent who wrote each message and mark virtual-assistant
   messages as `bot` (#156)
 
+### Fixed
+
+- `npm run db:seed` stopped before creating categories and products on a new database, so
+  the shop showed none; the catalogue and sample-order scripts now run as seeders (#171)
+
 ### Security
 
 - Removed the `mock-admin-token` backdoor (#122)
