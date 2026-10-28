@@ -18,3 +18,5 @@ Thumbs.db
 .idea/
 # Test coverage reports
 coverage/
+# Product images uploaded without S3 (#172)
+uploads/

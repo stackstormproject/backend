@@ -284,6 +284,37 @@ describe('adminProductService.createProduct', () => {
   });
 });
 
+describe('adminProductService gallery images (#172)', () => {
+  beforeEach(() => Product.findByPk.mockResolvedValue(product()));
+
+  it('should accept uploaded and linked images', async () => {
+    const row = product();
+    Product.findByPk.mockResolvedValue(row);
+
+    await service.updateProduct(5, {
+      primary_image: '/api/v1/media/products/a.jpg',
+      gallery_images: ['https://cdn.example/b.jpg', ' ', '/api/v1/media/products/c.webp'],
+    });
+
+    expect(row.update).toHaveBeenCalledWith({
+      primaryImage: '/api/v1/media/products/a.jpg',
+      galleryImages: ['https://cdn.example/b.jpg', '/api/v1/media/products/c.webp'],
+    });
+  });
+
+  it.each([
+    ['not a list', /list/],
+    [['a', 'b', 'c', 'd'], /at most 3/],
+    [['ftp://x/y.jpg'], /uploaded image/],
+    [['/api/v1/media/../secret'], /uploaded image/],
+  ])('should reject extra images %p', async (gallery, message) => {
+    await expect(service.updateProduct(5, { gallery_images: gallery })).rejects.toMatchObject({
+      statusCode: 400,
+      message: expect.stringMatching(message),
+    });
+  });
+});
+
 describe('adminProductService.updateProduct', () => {
   it('should return 404 for a missing product', async () => {
     Product.findByPk.mockResolvedValue(null);

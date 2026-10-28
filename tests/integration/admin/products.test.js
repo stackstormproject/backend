@@ -55,6 +55,39 @@ describe('Admin product management', () => {
     expect(logs).toEqual([{ change_quantity: 5, reason: 'opening stock', admin_id: admin.id }]);
   });
 
+  it('should save a main image and up to three extra images and show them in the shop (#172)', async () => {
+    const extra = [
+      '/api/v1/media/products/back.jpg',
+      'https://cdn.example.com/detail.jpg',
+      '/api/v1/media/products/worn.jpg',
+    ];
+    const res = await create({
+      primary_image: '/api/v1/media/products/main.jpg',
+      gallery_images: extra,
+    });
+
+    expect(res.status).toBe(201);
+    expect(res.body.data.gallery_images).toEqual(extra);
+    const shop = await request(app).get(`/api/v1/products/${res.body.data.slug}`);
+    expect(shop.body.data.images.map((img) => img.imageUrl)).toEqual([
+      '/api/v1/media/products/main.jpg',
+      ...extra,
+    ]);
+
+    const tooMany = await api('put', `/admin/products/${res.body.data.id}`).send({
+      gallery_images: [...extra, 'https://cdn.example.com/four.jpg'],
+    });
+    expect(tooMany.status).toBe(400);
+    const tricky = await api('put', `/admin/products/${res.body.data.id}`).send({
+      gallery_images: ['/api/v1/media/../../etc/passwd'],
+    });
+    expect(tricky.status).toBe(400);
+    const cleared = await api('put', `/admin/products/${res.body.data.id}`).send({
+      gallery_images: [],
+    });
+    expect(cleared.body.data.gallery_images).toEqual([]);
+  });
+
   it('should give a second product with the same name its own slug', async () => {
     const name = unique();
     const first = await create({ name });
@@ -68,7 +101,7 @@ describe('Admin product management', () => {
     [{ price: 0 }, /Price must be/],
     [{ name: 'x' }, /Name must be/],
     [{ category_id: 999999 }, /Category 999999 does not exist/],
-    [{ primary_image: 'javascript:alert(1)' }, /http\(s\) URL/],
+    [{ primary_image: 'javascript:alert(1)' }, /http\(s\) link or an uploaded image/],
     [{ variants: [{ size: 'M', stock_quantity: -1 }] }, /Opening stock/],
     [{ variants: [{ size: 'M' }, { size: 'M' }] }, /already has a M variant/],
   ])('should reject %j', async (overrides, message) => {
