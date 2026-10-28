@@ -17,6 +17,10 @@ All notable changes to this project are documented in this file.
   "Our brands"; products can be listed by section or brand (#173)
 - PDF invoice for paid orders: `GET /orders/:id/invoice` for the customer (or guest token)
   and `GET /admin/orders/:id/invoice` for managers (#174)
+- Hosted payment page: `POST /payments/checkout-session` sends the shopper to Stripe Checkout
+  (or the storefront's test gateway without a Stripe key) and `POST /payments/confirm-session`
+  verifies the session when they come back; the webhook also accepts
+  `checkout.session.completed` (#180)
 
 ### Changed
 
