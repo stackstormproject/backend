@@ -67,46 +67,8 @@ const parseAddress = (addr) => {
  * @param {string|null} guestToken
  * @returns {Promise<object>}
  */
-const getOrderById = async (orderId, customerId = null, guestToken = null) => {
-  if (!orderId) {
-    throw ApiError.badRequest('order_id is required');
-  }
-
-  const order = await Order.findByPk(orderId, {
-    include: [
-      {
-        model: OrderItem,
-        as: 'items',
-        include: [
-          {
-            model: ProductVariant,
-            as: 'variant',
-            include: [
-              {
-                model: Product,
-                as: 'product',
-                attributes: PRODUCT_SUMMARY_ATTRIBUTES,
-              },
-            ],
-          },
-        ],
-      },
-      {
-        model: Customer,
-        as: 'customer',
-        attributes: ['id', 'name', 'email', 'phone'],
-      },
-    ],
-  });
-
-  if (!order) {
-    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
-  }
-
-  if (!canReadOrder(order, customerId, guestToken)) {
-    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
-  }
-
+/** Public shape of an order with its lines and customer. */
+const toOrderView = (order) => {
   const plain = typeof order.toJSON === 'function' ? order.toJSON() : order;
   const invoiceNumber = generateInvoiceNumber(plain);
   const shippingAddress = parseAddress(plain.shippingAddress);
@@ -138,6 +100,59 @@ const getOrderById = async (orderId, customerId = null, guestToken = null) => {
     created_at: plain.createdAt || plain.orderDate,
     updated_at: plain.updatedAt || plain.orderDate,
   };
+};
+
+/** Order with lines, variants, products and customer. */
+const loadOrderWithDetails = async (orderId) =>
+  Order.findByPk(orderId, {
+    include: [
+      {
+        model: OrderItem,
+        as: 'items',
+        include: [
+          {
+            model: ProductVariant,
+            as: 'variant',
+            include: [
+              {
+                model: Product,
+                as: 'product',
+                attributes: PRODUCT_SUMMARY_ATTRIBUTES,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        model: Customer,
+        as: 'customer',
+        attributes: ['id', 'name', 'email', 'phone'],
+      },
+    ],
+  });
+
+const getOrderById = async (orderId, customerId = null, guestToken = null) => {
+  if (!orderId) {
+    throw ApiError.badRequest('order_id is required');
+  }
+
+  const order = await loadOrderWithDetails(orderId);
+
+  if (!order) {
+    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
+  }
+
+  if (!canReadOrder(order, customerId, guestToken)) {
+    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
+  }
+  return toOrderView(order);
+};
+
+/** Admin view of any order (no ownership check; the route is restricted to managers). */
+const getOrderForAdmin = async (orderId) => {
+  const order = await loadOrderWithDetails(orderId);
+  if (!order) throw ApiError.notFound(`Order with ID '${orderId}' not found`);
+  return toOrderView(order);
 };
 
 /**
@@ -312,6 +327,8 @@ const getOrderTracking = async (orderId, customerId = null, guestToken = null) =
 };
 
 module.exports = {
+  getOrderForAdmin,
+  toOrderView,
   getOrderById,
   getCustomerOrders,
   getOrderTracking,

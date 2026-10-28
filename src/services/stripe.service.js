@@ -171,6 +171,27 @@ const confirmOrderPayment = async (orderId, caller = {}, paymentIntentId = null)
   return markOrderPaid(order, intentId);
 };
 
+/**
+ * Refunds all or part of an order's payment. Mock payments (development/CI) are recorded as
+ * refunded without calling Stripe. `amount` is in rupees; omit it for a full refund.
+ * @returns {Promise<{ refunded: boolean, provider?: string, refundId?: string }>}
+ */
+const refundOrderPayment = async (order, amount = null) => {
+  if (!order.paymentIntentId) return { refunded: false };
+  const value = amount === null ? Number(order.totalAmount) : Number(amount);
+  if (!(value > 0)) return { refunded: false };
+  if (String(order.paymentIntentId).startsWith('mock_pi_')) {
+    logger.info(`[PAYMENT] Mock refund of LKR ${value} for order ${order.id}`);
+    return { refunded: true, provider: MOCK_PROVIDER, amount: value };
+  }
+  const refund = await getStripe().refunds.create(
+    { payment_intent: order.paymentIntentId, amount: toMinorUnits(value) },
+    { idempotencyKey: `refund-${order.id}-${toMinorUnits(value)}` }
+  );
+  logger.info(`[PAYMENT] Refund ${refund.id} of LKR ${value} for order ${order.id}`);
+  return { refunded: true, provider: STRIPE_PROVIDER, refundId: refund.id, amount: value };
+};
+
 /** Verifies a Stripe webhook signature against the raw request bytes. */
 const constructWebhookEvent = (rawPayload, signature) => {
   if (!signature) throw ApiError.badRequest('Missing Stripe-Signature header');
@@ -215,6 +236,7 @@ module.exports = {
   createPaymentIntent,
   confirmOrderPayment,
   markOrderPaid,
+  refundOrderPayment,
   constructWebhookEvent,
   handleWebhookEvent,
   MOCK_PROVIDER,
