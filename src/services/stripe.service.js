@@ -171,6 +171,106 @@ const confirmOrderPayment = async (orderId, caller = {}, paymentIntentId = null)
   return markOrderPaid(order, intentId);
 };
 
+// ---------------------------------------------------------------------------------------------
+// Hosted payment page (#180): checkout redirects the shopper to Stripe Checkout and Stripe
+// sends them back to the storefront, which asks the server to verify the session. Without a
+// Stripe key the storefront's own clearly labelled test gateway stands in for Stripe.
+// ---------------------------------------------------------------------------------------------
+const SESSION_TTL_SECONDS = 30 * 60; // Stripe's minimum
+const MOCK_SESSION_PREFIX = 'mock_cs_';
+
+const storefrontUrl = () =>
+  (
+    process.env.FRONTEND_CUSTOMER_URL ||
+    process.env.FRONTEND_URL ||
+    'http://localhost:5173'
+  ).replace(/\/+$/, '');
+
+/**
+ * Starts payment on the hosted page for a payment_pending order.
+ * @returns {{ provider, sessionId, url, amount }} url is where the browser goes next
+ */
+const createCheckoutSession = async (orderId, caller = {}) => {
+  const order = await loadOwnedOrder(orderId, caller);
+  if (order.status !== PAYABLE_STATUS) {
+    throw ApiError.conflict(`Order ${order.id} is not awaiting payment (status: ${order.status})`);
+  }
+  const amount = Number(order.totalAmount);
+  const back = `${storefrontUrl()}/checkout/complete?order=${order.id}`;
+
+  if (getProvider() === MOCK_PROVIDER) {
+    const sessionId = `${MOCK_SESSION_PREFIX}${order.id}_${Date.now()}`;
+    await order.update({ paymentIntentId: sessionId });
+    return {
+      provider: MOCK_PROVIDER,
+      sessionId,
+      url: `${storefrontUrl()}/checkout/test-gateway?order=${order.id}&session_id=${sessionId}`,
+      amount,
+    };
+  }
+
+  const session = await getStripe().checkout.sessions.create({
+    mode: 'payment',
+    payment_method_types: ['card'],
+    client_reference_id: String(order.id),
+    customer_email: order.guestEmail || undefined,
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: CURRENCY,
+          unit_amount: toMinorUnits(amount),
+          product_data: { name: `Dickwella Fashion Corner order #${order.id}` },
+        },
+      },
+    ],
+    metadata: { order_id: String(order.id) },
+    payment_intent_data: { metadata: { order_id: String(order.id) } },
+    success_url: `${back}&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${back}&cancelled=1`,
+    expires_at: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+  });
+  await order.update({ paymentIntentId: session.id });
+  return { provider: STRIPE_PROVIDER, sessionId: session.id, url: session.url, amount };
+};
+
+/**
+ * The shopper is back from the payment page. The server checks the session with Stripe
+ * (paid, amount, order) before marking the order paid; repeating the call is harmless.
+ */
+const confirmCheckoutSession = async (orderId, caller = {}, sessionId = null) => {
+  const order = await loadOwnedOrder(orderId, caller);
+  if (order.status === PAID_STATUS) return { orderId: order.id, status: order.status };
+  if (!sessionId || sessionId !== order.paymentIntentId) {
+    throw ApiError.badRequest('Payment session does not belong to this order');
+  }
+
+  if (sessionId.startsWith(MOCK_SESSION_PREFIX)) {
+    if (getProvider() !== MOCK_PROVIDER) {
+      throw ApiError.badRequest('Payment session does not belong to this order');
+    }
+    return markOrderPaid(order, `mock_pi_${order.id}_${Date.now()}`);
+  }
+
+  const session = await getStripe().checkout.sessions.retrieve(sessionId);
+  const paid = session.payment_status === 'paid';
+  const amountMatches = session.amount_total === toMinorUnits(order.totalAmount);
+  const orderMatches = String(session.metadata?.order_id) === String(order.id);
+  if (!paid || !amountMatches || !orderMatches) {
+    throw new ApiError(
+      402,
+      `Payment not completed (status: ${session.payment_status})`,
+      undefined,
+      'PAYMENT_NOT_COMPLETED'
+    );
+  }
+  const intentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id;
+  return markOrderPaid(order, intentId || sessionId);
+};
+
 /**
  * Refunds all or part of an order's payment. Mock payments (development/CI) are recorded as
  * refunded without calling Stripe. `amount` is in rupees; omit it for a full refund.
@@ -210,10 +310,22 @@ const constructWebhookEvent = (rawPayload, signature) => {
   }
 };
 
-/** Handles verified Stripe events; only payment_intent.succeeded changes state. */
+/** Handles verified Stripe events; payment_intent.succeeded and checkout.session.completed pay. */
 const handleWebhookEvent = async (event) => {
   const intent = event?.data?.object;
   const orderId = intent?.metadata?.order_id;
+  // #180: a paid hosted checkout also arrives as checkout.session.completed, in case the
+  // shopper closes the tab before coming back to the shop.
+  if (event?.type === 'checkout.session.completed') {
+    const order = orderId ? await Order.findByPk(orderId) : null;
+    if (!order || intent.payment_status !== 'paid') return { success: true, processed: false };
+    if (intent.amount_total !== toMinorUnits(order.totalAmount)) {
+      logger.error(`[STRIPE WEBHOOK] Amount mismatch for order ${orderId}`);
+      return { success: true, processed: false };
+    }
+    const result = await markOrderPaid(order, intent.payment_intent || intent.id);
+    return { success: true, processed: true, ...result };
+  }
   if (event?.type !== 'payment_intent.succeeded') {
     return { success: true, processed: false, ignoredEvent: event?.type };
   }
@@ -237,6 +349,8 @@ module.exports = {
   toMinorUnits,
   createPaymentIntent,
   confirmOrderPayment,
+  createCheckoutSession,
+  confirmCheckoutSession,
   markOrderPaid,
   refundOrderPayment,
   constructWebhookEvent,

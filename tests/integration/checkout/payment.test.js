@@ -67,6 +67,68 @@ describe('Payment flow (mock provider)', () => {
     expect(hold.status).toBe('CONFIRMED');
   });
 
+  it('should pay on the hosted payment page and come back to a paid order (#180)', async () => {
+    const { variant, checkout } = await startCheckout({ bearer });
+
+    const session = await request(app)
+      .post('/api/v1/payments/checkout-session')
+      .set('Authorization', bearer)
+      .send({ order_id: checkout.order_id });
+    expect(session.status).toBe(200);
+    expect(session.body.data).toMatchObject({ provider: 'mock', amount: 6450 });
+    expect(session.body.data.url).toBe(
+      `http://localhost:5173/checkout/test-gateway?order=${checkout.order_id}&session_id=${session.body.data.sessionId}`
+    );
+
+    const forged = await request(app)
+      .post('/api/v1/payments/confirm-session')
+      .set('Authorization', bearer)
+      .send({ order_id: checkout.order_id, session_id: 'mock_cs_forged' });
+    expect(forged.status).toBe(400);
+
+    const confirm = await request(app)
+      .post('/api/v1/payments/confirm-session')
+      .set('Authorization', bearer)
+      .send({ order_id: checkout.order_id, session_id: session.body.data.sessionId });
+    const again = await request(app)
+      .post('/api/v1/payments/confirm-session')
+      .set('Authorization', bearer)
+      .send({ order_id: checkout.order_id, session_id: session.body.data.sessionId });
+
+    expect(confirm.status).toBe(200);
+    expect(again.body.data.status).toBe('processing');
+    const order = await Order.findByPk(checkout.order_id);
+    expect(order.status).toBe('processing');
+    expect(order.paymentIntentId).toMatch(/^mock_pi_/);
+    expect((await ProductVariant.findByPk(variant.id)).reservedQuantity).toBe(0);
+
+    const late = await request(app)
+      .post('/api/v1/payments/checkout-session')
+      .set('Authorization', bearer)
+      .send({ order_id: checkout.order_id });
+    expect(late.status).toBe(409);
+  });
+
+  it('should keep the hosted payment page to the order owner (#180)', async () => {
+    const { checkout } = await startCheckout();
+
+    const stranger = await request(app)
+      .post('/api/v1/payments/checkout-session')
+      .send({ order_id: checkout.order_id });
+    const guest = await request(app)
+      .post('/api/v1/payments/checkout-session')
+      .set('X-Guest-Token', checkout.guest_order_token)
+      .send({ order_id: checkout.order_id });
+    const missing = await request(app).post('/api/v1/payments/confirm-session').send({});
+
+    expect(stranger.status).toBe(404);
+    expect(guest.status).toBe(200);
+    expect(missing.status).toBe(400);
+    expect((await request(app).post('/api/v1/payments/checkout-session').send({})).status).toBe(
+      400
+    );
+  });
+
   it('should let a guest pay with the guest order token', async () => {
     const { checkout } = await startCheckout();
 

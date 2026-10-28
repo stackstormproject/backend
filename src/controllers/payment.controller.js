@@ -41,6 +41,34 @@ const confirmPayment = async (req, res, next) => {
   }
 };
 
+/** POST /payments/checkout-session { order_id } -> { provider, sessionId, url } (#180) */
+const createCheckoutSession = async (req, res, next) => {
+  try {
+    const orderId = req.body.order_id || req.body.orderId;
+    if (!orderId) throw ApiError.badRequest('order_id is required in request body');
+    const result = await stripeService.createCheckoutSession(orderId, callerOf(req));
+    return successResponse(res, result, 'Payment page ready', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** POST /payments/confirm-session { order_id, session_id } - verified on the server (#180) */
+const confirmCheckoutSession = async (req, res, next) => {
+  try {
+    const orderId = req.body.order_id || req.body.orderId;
+    if (!orderId) throw ApiError.badRequest('order_id is required in request body');
+    const result = await stripeService.confirmCheckoutSession(
+      orderId,
+      callerOf(req),
+      req.body.session_id || req.body.sessionId || null
+    );
+    return successResponse(res, result, 'Payment confirmed', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 /** POST /payments/webhook - Stripe calls this; req.body is the raw Buffer (see app.js). */
 const handleWebhook = async (req, res, next) => {
   try {
@@ -60,5 +88,7 @@ module.exports = {
   callerOf,
   createPaymentIntent,
   confirmPayment,
+  createCheckoutSession,
+  confirmCheckoutSession,
   handleWebhook,
 };
