@@ -103,14 +103,60 @@ describe('productDetail Service - Variant Matrix & Stock Availability', () => {
       expect(result.variants).toHaveLength(1);
       expect(result.variants[0].available_stock).toBe(6);
 
-      // Verify gallery images sorted by displayOrder ASC
-      expect(result.images).toHaveLength(2);
-      expect(result.images[0].displayOrder).toBe(1);
-      expect(result.images[1].displayOrder).toBe(2);
+      // Main image first (#172), then variant images sorted by displayOrder ASC
+      expect(result.images.map((img) => img.imageUrl)).toEqual([
+        'https://cdn.example.com/shirt-primary.jpg',
+        'https://cdn.example.com/img1.jpg',
+        'https://cdn.example.com/img2.jpg',
+      ]);
 
       // Verify review statistics
       expect(result.reviewsSummary.averageRating).toBe(4.5);
       expect(result.reviewsSummary.reviewCount).toBe(2);
+    });
+
+    it('should show the main image and the extra images first, without repeats (#172)', async () => {
+      jest.spyOn(Product, 'findOne').mockResolvedValue({
+        id: 2,
+        name: 'Linen Saree',
+        price: '9000.00',
+        primaryImage: '/api/v1/media/products/main.jpg',
+        galleryImages: ['/api/v1/media/products/back.jpg', 'https://cdn.example.com/detail.jpg'],
+        variants: [
+          {
+            id: 21,
+            size: 'Free Size',
+            stockQuantity: 3,
+            reservedQuantity: 0,
+            images: [{ id: 5, imageUrl: 'https://cdn.example.com/detail.jpg', displayOrder: 0 }],
+          },
+        ],
+        reviews: [],
+      });
+
+      const result = await getProductBySlug('linen-saree');
+
+      expect(result.images.map((img) => img.imageUrl)).toEqual([
+        '/api/v1/media/products/main.jpg',
+        '/api/v1/media/products/back.jpg',
+        'https://cdn.example.com/detail.jpg',
+      ]);
+      expect(result.gallery_images).toHaveLength(2);
+    });
+
+    it('should return no images for a product without pictures', async () => {
+      jest.spyOn(Product, 'findOne').mockResolvedValue({
+        id: 3,
+        name: 'Plain Sarong',
+        price: '1000.00',
+        variants: [],
+        reviews: [],
+      });
+
+      const result = await getProductBySlug('plain-sarong');
+
+      expect(result.images).toEqual([]);
+      expect(result.gallery_images).toEqual([]);
     });
 
     it('should return null when slug is empty or falsy', async () => {

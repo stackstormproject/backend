@@ -11,6 +11,8 @@ All notable changes to this project are documented in this file.
   archiving (#136); return review, receiving, refunds and exchanges (#137); customer records
   and audited loyalty adjustments (#138)
 - Support-agent account in the demo seed (#140)
+- Product photos: a main image and up to three extra images, uploaded from the admin console;
+  without S3 they are stored on the backend's disk and served under `/api/v1/media` (#172)
 
 ### Changed
 

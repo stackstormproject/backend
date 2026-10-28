@@ -135,15 +135,24 @@ const fetchProductDetailFromDb = async (slug) => {
     (a, b) => (a.displayOrder ?? a.display_order ?? 0) - (b.displayOrder ?? b.display_order ?? 0)
   );
 
-  // If no variant images, add primary image as initial gallery element
-  if (galleryImages.length === 0 && plain.primaryImage) {
-    galleryImages.push({
-      id: 0,
-      imageUrl: plain.primaryImage,
-      isPrimary: true,
-      displayOrder: 0,
-    });
-  }
+  // The main image and up to three extra product images come first (#172), then any
+  // variant-specific images; the same picture is never listed twice.
+  const productImages = [plain.primaryImage, ...(plain.galleryImages || [])]
+    .filter(Boolean)
+    .map((imageUrl, index) => ({
+      id: -(index + 1),
+      imageUrl,
+      isPrimary: index === 0,
+      displayOrder: index,
+    }));
+  const seen = new Set(productImages.map((img) => img.imageUrl));
+  galleryImages.forEach((img) => {
+    const url = img.imageUrl ?? img.image_url;
+    if (!seen.has(url)) {
+      seen.add(url);
+      productImages.push(img);
+    }
+  });
 
   // Calculate review summary statistics
   const reviews = plain.reviews || [];
@@ -164,8 +173,9 @@ const fetchProductDetailFromDb = async (slug) => {
     brand: plain.brand,
     is_final_sale: plain.isFinalSale ?? plain.is_final_sale ?? false,
     primary_image: plain.primaryImage ?? plain.primary_image,
+    gallery_images: plain.galleryImages || [],
     variants,
-    images: galleryImages,
+    images: productImages,
     reviewsSummary: {
       averageRating,
       reviewCount,
@@ -422,6 +432,7 @@ const listProducts = async ({
       base_price: plain.price,
       category: plain.categoryDetails?.name || plain.category,
       primary_image: plain.primaryImage ?? plain.primary_image,
+      gallery_images: plain.galleryImages || [],
       variants: (plain.variants || []).map(formatVariant),
     };
   });
