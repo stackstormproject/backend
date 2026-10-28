@@ -15,6 +15,7 @@ const reviewRouter = require('./review.routes');
 const returnRouter = require('./return.routes');
 const loyaltyRouter = require('./loyalty.routes');
 const adminRouter = require('./admin.routes');
+const brandRouter = require('./brand.routes');
 
 const router = Router();
 
@@ -28,6 +29,7 @@ router.use('/auth', authRouter);
 router.use('/users', userRouter);
 router.use('/categories', categoryRouter);
 router.use('/products', productRouter);
+router.use('/brands', brandRouter);
 router.use('/upload', uploadRouter);
 router.use('/cart', cartRouter);
 router.use('/checkout', checkoutRouter);
@@ -47,6 +49,7 @@ v1Router.use('/auth', authRouter);
 v1Router.use('/users', userRouter);
 v1Router.use('/categories', categoryRouter);
 v1Router.use('/products', productRouter);
+v1Router.use('/brands', brandRouter);
 v1Router.use('/upload', uploadRouter);
 v1Router.use('/cart', cartRouter);
 v1Router.use('/checkout', checkoutRouter);

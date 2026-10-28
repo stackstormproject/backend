@@ -7,6 +7,7 @@ const sequelize = new Sequelize(config[env].url, config[env]);
 const EXPECTED_TABLES = [
   'addresses',
   'admins',
+  'brands',
   'cart_items',
   'carts',
   'chat_messages',
@@ -42,7 +43,7 @@ describe('database schema', () => {
     await sequelize.close();
   });
 
-  it('should contain all 23 tables given the migrations ran', async () => {
+  it('should contain every table given the migrations ran', async () => {
     const [rows] = await sequelize.query(
       "SELECT table_name, table_type FROM information_schema.tables WHERE table_schema = 'public'"
     );
