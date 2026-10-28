@@ -32,6 +32,10 @@ Node.js 20, Express 4, Sequelize 6, PostgreSQL 17, Redis 7, Jest and Supertest.
 The seed creates two staff accounts, both with the password in `SEED_ADMIN_PASSWORD`:
 `admin@stackstorm.lk` (super_admin) and `support@stackstorm.lk` (support_agent).
 
+`npm run db:seed` is for an empty database. For a database created before Sprint 8, run
+`npx sequelize-cli db:migrate`, then `node src/seeders/seedCategoriesAndProducts.js`
+(categories, products and sizes; safe to repeat), then restart the API.
+
 ## Admin API
 
 All routes are under `/api/v1/admin` and need a staff access token
