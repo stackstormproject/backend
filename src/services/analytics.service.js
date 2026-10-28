@@ -8,7 +8,6 @@ const {
   Return,
   ChatSession,
 } = require('../models');
-const ApiError = require('../utils/ApiError');
 
 /**
  * Formats an amount into standard Sri Lankan Rupee display string.
@@ -221,92 +220,8 @@ const getSalesTrend = async (_days = 30) => {
   };
 };
 
-/**
- * Retrieves all platform orders with optional status filter for back-office management.
- *
- * @param {object} options
- * @returns {Promise<object>}
- */
-const getAllOrders = async (options = {}) => {
-  const page = Math.max(1, parseInt(options.page, 10) || 1);
-  const limit = Math.min(50, Math.max(1, parseInt(options.limit, 10) || 20));
-  const offset = (page - 1) * limit;
-
-  const where = {};
-  if (options.status) {
-    where.status = options.status;
-  }
-
-  const { count, rows } = await Order.findAndCountAll({
-    where,
-    include: [
-      {
-        model: Customer,
-        as: 'customer',
-        attributes: ['id', 'name', 'email'],
-      },
-    ],
-    order: [['order_date', 'DESC']],
-    limit,
-    offset,
-  });
-
-  return {
-    orders: rows.map((o) => ({
-      id: o.id,
-      order_number: o.trackingNumber || `DFC-202610-${1000 + o.id}`,
-      customer_id: o.customerId,
-      customer_name: o.customer?.name || o.guestEmail || 'Guest Customer',
-      customer_email: o.customer?.email || o.guestEmail || '',
-      status: o.status,
-      total_amount: Number(o.totalAmount || 0),
-      formatted_total: formatLKR(o.totalAmount || 0),
-      order_date: o.orderDate,
-    })),
-    pagination: {
-      total: count,
-      page,
-      limit,
-      total_pages: Math.ceil(count / limit) || 1,
-    },
-  };
-};
-
-/**
- * Updates order status by admin (e.g. 'processing' -> 'shipped' -> 'delivered').
- *
- * @param {number|string} orderId
- * @param {string} newStatus
- * @param {string} [trackingNumber]
- * @returns {Promise<object>}
- */
-const updateOrderStatus = async (orderId, newStatus, trackingNumber = null) => {
-  const order = await Order.findByPk(orderId);
-  if (!order) {
-    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
-  }
-
-  const updates = { status: newStatus };
-  if (trackingNumber) {
-    updates.trackingNumber = trackingNumber;
-  }
-  if (newStatus === 'delivered' && !order.deliveryDate) {
-    updates.deliveryDate = new Date();
-  }
-
-  await order.update(updates);
-  return {
-    id: order.id,
-    status: order.status,
-    tracking_number: order.trackingNumber,
-    delivery_date: order.deliveryDate,
-  };
-};
-
 module.exports = {
   formatLKR,
   getAnalyticsOverview,
   getSalesTrend,
-  getAllOrders,
-  updateOrderStatus,
 };
