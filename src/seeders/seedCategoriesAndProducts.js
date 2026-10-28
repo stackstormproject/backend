@@ -1,6 +1,40 @@
 /* eslint-disable */
 const { Category, Product, ProductVariant, sequelize } = require('../models');
 
+const ONE_SIZE_CATEGORIES = ['Accessories', 'Shawls & Bags'];
+const FREE_SIZE_CATEGORIES = ['Women', 'Saree', 'Saris'];
+const XL_SURCHARGE_LKR = 250;
+
+/** Size matrix for a product: apparel S-XL (XL costs more), sarees free size, accessories one size. */
+function variantSpecsFor(product) {
+  const color = product.material && /batik/i.test(product.name) ? 'Indigo' : 'Natural';
+  if (ONE_SIZE_CATEGORIES.includes(product.category)) {
+    return [{ code: 'OS', size: 'One Size', color, stock: 15, surcharge: 0 }];
+  }
+  if (FREE_SIZE_CATEGORIES.includes(product.category) || /sar(ee|i)/i.test(product.name)) {
+    return [{ code: 'FS', size: 'Free Size', color, stock: 12, surcharge: 0 }];
+  }
+  return [
+    { code: 'S', size: 'S', color, stock: 8, surcharge: 0 },
+    { code: 'M', size: 'M', color, stock: 12, surcharge: 0 },
+    { code: 'L', size: 'L', color, stock: 10, surcharge: 0 },
+    { code: 'XL', size: 'XL', color, stock: 2, surcharge: XL_SURCHARGE_LKR },
+  ];
+}
+
+/** The category arrays use snake_case keys; the model attributes are camelCase. */
+function toCategoryAttributes(cat) {
+  return {
+    id: cat.id,
+    name: cat.name,
+    slug: cat.slug,
+    description: cat.description || null,
+    parentId: cat.parent_id ?? null,
+    sortOrder: cat.sort_order ?? 0,
+    isActive: cat.is_active ?? true,
+  };
+}
+
 async function seedCategoriesAndProducts() {
   const rootCategories = [
     {
@@ -40,9 +74,9 @@ async function seedCategoriesAndProducts() {
   for (const cat of rootCategories) {
     const existing = await Category.findByPk(cat.id);
     if (!existing) {
-      await Category.create(cat);
+      await Category.create(toCategoryAttributes(cat));
     } else {
-      await existing.update(cat);
+      await existing.update(toCategoryAttributes(cat));
     }
   }
 
@@ -148,9 +182,9 @@ async function seedCategoriesAndProducts() {
   for (const sub of subCategories) {
     const existing = await Category.findByPk(sub.id);
     if (!existing) {
-      await Category.create(sub);
+      await Category.create(toCategoryAttributes(sub));
     } else {
-      await existing.update(sub);
+      await existing.update(toCategoryAttributes(sub));
     }
   }
 
@@ -284,20 +318,28 @@ async function seedCategoriesAndProducts() {
   for (const prod of artisanProducts) {
     const existing = await Product.findByPk(prod.id);
     if (!existing) {
-      const created = await Product.create(prod);
-      // Create sample variants
-      if (ProductVariant) {
-        await ProductVariant.create({
-          productId: created.id,
-          sku: `${(prod.slug || 'PRD').substring(0, 6).toUpperCase()}-OS`,
-          size: prod.category === 'Women' ? 'Free Size' : 'M',
-          color: 'Default',
-          stockQuantity: 25,
-          reservedQuantity: 0,
-        }).catch(() => {});
-      }
+      await Product.create(prod);
     } else {
       await existing.update(prod);
+    }
+  }
+
+  // Every product needs at least one purchasable variant, including products from other
+  // seeders. SKUs are derived from the product id, so they never collide.
+  const allProducts = await Product.findAll();
+  for (const product of allProducts) {
+    for (const spec of variantSpecsFor(product)) {
+      await ProductVariant.findOrCreate({
+        where: { sku: `DFC-${product.id}-${spec.code}` },
+        defaults: {
+          productId: product.id,
+          size: spec.size,
+          color: spec.color,
+          stockQuantity: spec.stock,
+          reservedQuantity: 0,
+          additionalPrice: spec.surcharge,
+        },
+      });
     }
   }
 
@@ -322,6 +364,8 @@ async function seedCategoriesAndProducts() {
 }
 
 module.exports = seedCategoriesAndProducts;
+module.exports.variantSpecsFor = variantSpecsFor;
+module.exports.toCategoryAttributes = toCategoryAttributes;
 
 if (require.main === module) {
   seedCategoriesAndProducts()
