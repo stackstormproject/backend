@@ -1,5 +1,5 @@
 /* eslint-disable */
-const { Category, Product, ProductVariant, sequelize } = require('../models');
+const { Brand, Category, Product, ProductVariant, sequelize } = require('../models');
 
 const ONE_SIZE_CATEGORIES = ['Accessories', 'Shawls & Bags'];
 const FREE_SIZE_CATEGORIES = ['Women', 'Saree', 'Saris'];
@@ -322,6 +322,26 @@ async function seedCategoriesAndProducts() {
     } else {
       await existing.update(prod);
     }
+  }
+
+  // Home page sections and brands (#173). Flags are only set when staff have chosen none yet,
+  // so running the seed again never overwrites their choices.
+  const demoBrands = [
+    { name: 'Dickwella Atelier', tagline: 'Handloom and batik from our own looms', sortOrder: 1 },
+    { name: 'Dickwella Junior', tagline: 'Festive wear for little ones', sortOrder: 2 },
+    { name: 'Dickwella', tagline: 'Everyday cotton classics', sortOrder: 3 },
+  ];
+  for (const brand of demoBrands) {
+    await Brand.findOrCreate({
+      where: { name: brand.name },
+      defaults: { ...brand, slug: brand.name.toLowerCase().replace(/\s+/g, '-') },
+    });
+  }
+  if ((await Product.count({ where: { isNewArrival: true } })) === 0) {
+    await Product.update({ isNewArrival: true }, { where: { id: [8, 9, 10, 11, 12, 13] } });
+  }
+  if ((await Product.count({ where: { isPopular: true } })) === 0) {
+    await Product.update({ isPopular: true }, { where: { id: [6, 7, 9, 2, 11, 13] } });
   }
 
   // Every product needs at least one purchasable variant, including products from other

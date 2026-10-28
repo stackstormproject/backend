@@ -39,6 +39,12 @@ The seed creates two staff accounts, both with the password in `SEED_ADMIN_PASSW
 Uploaded product images are saved in `uploads/` and served under `/api/v1/media` unless
 `STORAGE_DRIVER=s3` (or real AWS keys) is set.
 
+## Shop sections and brands
+
+`GET /products?section=new_arrivals|popular` lists the products staff marked for the home page
+(`is_new_arrival`, `is_popular` on the product), and `GET /products?brand=<slug or name>` one
+brand's products. `GET /brands` lists featured brands that have products on sale.
+
 ## Admin API
 
 All routes are under `/api/v1/admin` and need a staff access token
@@ -50,6 +56,7 @@ the support routes.
 | Analytics | `GET analytics`, `GET analytics/sales-trend?days=`                                            | Managers  |
 | Orders    | `GET orders`, `GET orders/:id`, `PATCH orders/:id/status`                                     | Managers  |
 | Products  | `GET/POST products`, `GET/PUT/DELETE products/:id`, `POST/PATCH/DELETE products/:id/variants` | Managers  |
+| Brands    | `GET/POST brands`, `PUT/DELETE brands/:id`                                                    | Managers  |
 | Stock     | `GET inventory`, `POST inventory/:variantId/adjust`, `GET inventory/:variantId/logs`          | Managers  |
 | Returns   | `GET returns`, `GET returns/:id`, `POST returns/:id/approve\|reject\|receive`                 | Managers  |
 | Customers | `GET customers`, `GET customers/:id`, `POST customers/:id/loyalty-adjustments`                | Managers  |
