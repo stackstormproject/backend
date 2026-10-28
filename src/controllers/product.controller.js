@@ -5,6 +5,7 @@
 // ==============================================================================
 
 const productService = require('../services/product.service');
+const brandService = require('../services/brand.service');
 const { successResponse, errorResponse } = require('../utils/responseFormatter');
 
 /**
@@ -36,7 +37,8 @@ const getProducts = async (req, res, next) => {
     const minPrice = req.query.min_price !== undefined ? req.query.min_price : req.query.minPrice;
     const maxPrice = req.query.max_price !== undefined ? req.query.max_price : req.query.maxPrice;
     const search = req.query.search || req.query.q || req.query.keyword;
-    const { size, color, sort, page = 1, limit = 12 } = req.query;
+    const { size, color, sort, section, page = 1, limit = 12 } = req.query;
+    const brand = req.query.brand ? await brandService.brandNameFor(req.query.brand) : undefined;
 
     const result = await productService.listProducts({
       categoryId,
@@ -46,6 +48,8 @@ const getProducts = async (req, res, next) => {
       color,
       sort,
       search,
+      section,
+      brand,
       page,
       limit,
     });

@@ -49,6 +49,18 @@ module.exports = (sequelize) => {
         allowNull: true,
         field: 'primary_image',
       },
+      isNewArrival: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: 'is_new_arrival',
+      },
+      isPopular: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        field: 'is_popular',
+      },
       galleryImages: {
         type: DataTypes.JSONB,
         allowNull: false,
