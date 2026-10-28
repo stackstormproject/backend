@@ -210,10 +210,17 @@ const listProducts = async ({
   color,
   sort,
   search,
+  section,
+  brand,
   page = 1,
   limit = 12,
 }) => {
   const andConditions = [{ isActive: true }]; // archived products are hidden from the shop
+
+  // Home page sections chosen by staff (#173)
+  if (section === 'new_arrivals') andConditions.push({ isNewArrival: true });
+  if (section === 'popular') andConditions.push({ isPopular: true });
+  if (brand) andConditions.push({ brand });
   const variantWhere = {};
 
   if (categoryId && categoryId !== 'all' && categoryId !== 'null' && categoryId !== 'undefined') {
@@ -433,6 +440,9 @@ const listProducts = async ({
       category: plain.categoryDetails?.name || plain.category,
       primary_image: plain.primaryImage ?? plain.primary_image,
       gallery_images: plain.galleryImages || [],
+      brand: plain.brand || null,
+      is_new_arrival: Boolean(plain.isNewArrival),
+      is_popular: Boolean(plain.isPopular),
       variants: (plain.variants || []).map(formatVariant),
     };
   });
