@@ -1,5 +1,7 @@
 const adminOrderService = require('../services/adminOrder.service');
 const { successResponse } = require('../utils/responseFormatter');
+const { getOrderForAdmin } = require('../services/order.service');
+const { sendInvoice } = require('../utils/sendInvoice');
 
 const list = async (req, res, next) => {
   try {
@@ -12,6 +14,14 @@ const list = async (req, res, next) => {
 const detail = async (req, res, next) => {
   try {
     return successResponse(res, await adminOrderService.getOrder(req.params.id), 'Order retrieved');
+  } catch (error) {
+    return next(error);
+  }
+};
+
+const invoice = async (req, res, next) => {
+  try {
+    return await sendInvoice(res, await getOrderForAdmin(req.params.id));
   } catch (error) {
     return next(error);
   }
@@ -30,4 +40,4 @@ const updateStatus = async (req, res, next) => {
   }
 };
 
-module.exports = { list, detail, updateStatus };
+module.exports = { list, detail, invoice, updateStatus };

@@ -24,6 +24,7 @@ router.get('/analytics/sales-trend', managers, analyticsController.getSalesTrend
 
 router.get('/orders', managers, adminOrderController.list);
 router.get('/orders/:id', managers, adminOrderController.detail);
+router.get('/orders/:id/invoice', managers, adminOrderController.invoice);
 router.patch('/orders/:id/status', managers, adminOrderController.updateStatus);
 
 router.get('/products', managers, adminProductController.list);
