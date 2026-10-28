@@ -7,6 +7,7 @@ const requestLogger = require('./middleware/requestLogger');
 const { notFound, errorHandler } = require('./middleware/errorHandler');
 
 const corsOptions = require('./config/cors');
+const { MEDIA_ROUTE, UPLOAD_DIR } = require('./config/storage');
 
 const app = express();
 // Trust reverse proxy chain (ALB, Nginx, Cloudflare) so req.ip extracts the real client IP
@@ -21,6 +22,12 @@ app.use(
   express.raw({ type: 'application/json', limit: '1mb' })
 );
 app.use(express.json({ limit: '10kb' }));
+// Product images uploaded to local disk (#172). Read-only; unknown files fall through to 404.
+app.use(
+  MEDIA_ROUTE,
+  helmet.crossOriginResourcePolicy({ policy: 'cross-origin' }),
+  express.static(UPLOAD_DIR, { maxAge: '7d', index: false, dotfiles: 'deny' })
+);
 app.use(cookieParser());
 app.use(requestLogger);
 app.use('/api', routes);

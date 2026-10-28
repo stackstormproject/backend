@@ -36,6 +36,9 @@ The seed creates two staff accounts, both with the password in `SEED_ADMIN_PASSW
 `npx sequelize-cli db:migrate`, then `node src/seeders/seedCategoriesAndProducts.js`
 (categories, products and sizes; safe to repeat), then restart the API.
 
+Uploaded product images are saved in `uploads/` and served under `/api/v1/media` unless
+`STORAGE_DRIVER=s3` (or real AWS keys) is set.
+
 ## Admin API
 
 All routes are under `/api/v1/admin` and need a staff access token

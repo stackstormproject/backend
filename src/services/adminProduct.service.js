@@ -20,11 +20,29 @@ const COLOR_MAX = 30;
 const MAX_VARIANTS = 30;
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
-const URL_PATTERN = /^https?:\/\/\S+$/i;
+const MAX_GALLERY_IMAGES = 3;
+// An image is an http(s) link or a file uploaded to this backend's disk (/api/v1/media/...).
+const URL_PATTERN = /^(https?:\/\/\S+|\/api\/v1\/media\/[\w./-]+)$/i;
 
 const text = (value, max) => {
   const clean = String(value ?? '').trim();
   return clean ? clean.slice(0, max) : null;
+};
+
+const imageRef = (value, field) => {
+  const url = text(value, 500);
+  if (url && (!URL_PATTERN.test(url) || url.includes('..'))) {
+    throw ApiError.badRequest(`${field} must be an http(s) link or an uploaded image`);
+  }
+  return url;
+};
+
+const galleryImages = (value) => {
+  if (!Array.isArray(value)) throw ApiError.badRequest('Extra images must be a list');
+  if (value.length > MAX_GALLERY_IMAGES) {
+    throw ApiError.badRequest(`Add at most ${MAX_GALLERY_IMAGES} extra images`);
+  }
+  return value.map((url) => imageRef(url, 'Each extra image')).filter(Boolean);
 };
 
 const money = (value, field, { allowZero = false } = {}) => {
@@ -60,11 +78,8 @@ const productFields = async (body, { partial = false } = {}) => {
   }
   if (body.is_final_sale !== undefined) fields.isFinalSale = Boolean(body.is_final_sale);
   if (body.is_active !== undefined) fields.isActive = Boolean(body.is_active);
-  if (body.primary_image !== undefined) {
-    const url = text(body.primary_image, 500);
-    if (url && !URL_PATTERN.test(url)) throw ApiError.badRequest('Image must be an http(s) URL');
-    fields.primaryImage = url;
-  }
+  if (body.primary_image !== undefined) fields.primaryImage = imageRef(body.primary_image, 'Image');
+  if (body.gallery_images !== undefined) fields.galleryImages = galleryImages(body.gallery_images);
   if (body.category_id !== undefined) {
     if (body.category_id === null || body.category_id === '') {
       fields.categoryId = null;
@@ -169,6 +184,7 @@ const toAdminProduct = (product, usage = new Map()) => {
     is_final_sale: plain.isFinalSale,
     is_active: plain.isActive,
     primary_image: plain.primaryImage,
+    gallery_images: plain.galleryImages || [],
     variants,
     total_available: variants.reduce((sum, v) => sum + v.available, 0),
     created_at: plain.createdAt,

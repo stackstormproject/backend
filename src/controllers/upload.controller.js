@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const ApiError = require('../utils/ApiError');
 const { bucketName, region } = require('../config/s3');
 const logger = require('../config/logger');
+const { mediaUrl } = require('../config/storage');
 
 /**
  * Controller to handle batch image uploads to S3 / Object Storage
@@ -23,6 +24,9 @@ const uploadImages = async (req, res, next) => {
     const cdnBase = process.env.CDN_URL || process.env.AWS_CLOUDFRONT_URL;
 
     const urls = req.files.map((file) => {
+      // Saved on the backend's own disk (no S3 bucket configured)
+      if (file.path && file.filename) return mediaUrl(`products/${file.filename}`);
+
       if (file.location) {
         if (cdnBase && file.key) {
           return `${cdnBase.replace(/\/+$/, '')}/${file.key}`;
@@ -46,7 +50,7 @@ const uploadImages = async (req, res, next) => {
       return `https://${bucketName}.s3.${region}.amazonaws.com/${fileKey}`;
     });
 
-    logger.info(`[UPLOAD] Successfully uploaded ${urls.length} image(s) to cloud storage`);
+    logger.info(`[UPLOAD] Successfully uploaded ${urls.length} image(s)`);
 
     return res.status(201).json({
       success: true,
