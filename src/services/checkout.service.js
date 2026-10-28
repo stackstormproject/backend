@@ -175,6 +175,9 @@ const initiateCheckout = async (checkoutData = {}) => {
     }
 
     const prod = dbVariant.product || {};
+    if (prod.isActive === false) {
+      throw ApiError.conflict(`'${prod.name}' is no longer sold. Remove it from your bag.`);
+    }
     // Product price plus the variant surcharge (e.g. XXL). Never trust a client-sent price.
     const unitPrice = Number(
       (Number(prod.price || 0) + Number(dbVariant.additionalPrice || 0)).toFixed(2)
