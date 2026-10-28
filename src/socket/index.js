@@ -1,7 +1,11 @@
 /* eslint-disable no-param-reassign */
 const { Server } = require('socket.io');
-const jwt = require('jsonwebtoken');
+const { verifyAccessToken } = require('../utils/tokenGenerator');
+const { toRequestUser } = require('../middleware/auth');
+const { isOriginAllowed } = require('../config/cors');
 const logger = require('../config/logger');
+
+const GUEST_USER = Object.freeze({ id: null, userId: null, role: 'guest', name: 'Guest' });
 const { ChatSession, ChatMessage, Order, Customer } = require('../models');
 
 /**
@@ -147,22 +151,13 @@ async function generateBotReply(text, customerId) {
  * @returns {import('socket.io').Server}
  */
 function initSocketServer(httpServer, options = {}) {
-  const allowedOrigins = [
-    process.env.FRONTEND_URL || 'http://localhost:5173',
-    'http://localhost:5173',
-    'http://localhost:5174',
-    'http://127.0.0.1:5173',
-    'http://127.0.0.1:5174',
-  ];
-
   const io = new Server(httpServer, {
     cors: {
       origin: (origin, callback) => {
-        // Allow requests with no origin (e.g. mobile apps, curl, or same-origin server-to-server)
-        if (!origin || allowedOrigins.includes(origin)) {
-          return callback(null, true);
-        }
-        return callback(null, true); // Permissive in dev to avoid blocking
+        // Same allow-list as HTTP CORS (config/cors.js). Accepting any origin with
+        // credentials would allow cross-site WebSocket hijacking.
+        if (isOriginAllowed(origin)) return callback(null, true);
+        return callback(new Error('Origin not allowed'), false);
       },
       credentials: true,
       methods: ['GET', 'POST'],
@@ -180,44 +175,20 @@ function initSocketServer(httpServer, options = {}) {
           ? socket.handshake.headers.authorization.slice(7)
           : null);
 
-      if (token && process.env.JWT_SECRET) {
+      // Verify with the same rules as HTTP (signature + issuer). No literal test tokens.
+      socket.user = GUEST_USER;
+      if (token) {
         try {
-          const decoded = jwt.verify(token, process.env.JWT_SECRET);
+          const payload = toRequestUser(verifyAccessToken(token));
           socket.user = {
-            id: decoded.userId || decoded.id || 1,
-            userId: decoded.userId || decoded.id || 1,
-            role: decoded.role || 'guest',
-            name:
-              decoded.name || (decoded.role === 'customer' ? 'Customer' : 'Alex (Support Agent)'),
+            id: payload.id,
+            userId: payload.id,
+            role: payload.role,
+            name: payload.role === 'customer' ? 'Customer' : 'Support agent',
           };
         } catch {
-          if (
-            process.env.NODE_ENV !== 'production' &&
-            (token === 'jwt-admin-token-xyz' || token === 'mock-admin-token')
-          ) {
-            socket.user = {
-              id: 1,
-              userId: 1,
-              role: 'super_admin',
-              name: 'Alex (Support Agent)',
-            };
-          } else {
-            // Token invalid or expired: proceed as guest
-            socket.user = { id: null, userId: null, role: 'guest', name: 'Guest' };
-          }
+          socket.user = GUEST_USER; // invalid or expired: continue as a guest
         }
-      } else if (
-        process.env.NODE_ENV !== 'production' &&
-        (token === 'jwt-admin-token-xyz' || token === 'mock-admin-token')
-      ) {
-        socket.user = {
-          id: 1,
-          userId: 1,
-          role: 'super_admin',
-          name: 'Alex (Support Agent)',
-        };
-      } else {
-        socket.user = { id: null, userId: null, role: 'guest', name: 'Guest' };
       }
       next();
     } catch (err) {
@@ -227,8 +198,7 @@ function initSocketServer(httpServer, options = {}) {
 
   io.on('connection', (socket) => {
     const isAgent =
-      socket.user &&
-      ['admin', 'super_admin', 'support_agent', 'inventory_staff'].includes(socket.user.role);
+      socket.user && ['admin', 'super_admin', 'support_agent'].includes(socket.user.role);
 
     logger.info('[SOCKET] Client connected', {
       socketId: socket.id,
