@@ -14,7 +14,8 @@ const cookieOptions = () => ({
   httpOnly: true,
   secure: process.env.NODE_ENV === 'production',
   sameSite: 'strict',
-  path: '/api/auth',
+  // '/api' so the cookie reaches both /api/auth and /api/v1/auth (the storefront uses v1)
+  path: '/api',
   maxAge: getRefreshTtlMs(),
 });
 const router = Router();
@@ -43,6 +44,24 @@ router.post(
     res.json({ customer, accessToken });
   })
 );
+router.post(
+  '/refresh',
+  asyncHandler(async (req, res) => {
+    const result = await AuthService.refreshSession(req.cookies?.[REFRESH_COOKIE]);
+    const { refreshToken, ...body } = result;
+    res.cookie(REFRESH_COOKIE, refreshToken, cookieOptions());
+    res.json(body);
+  })
+);
+router.post(
+  '/logout',
+  asyncHandler(async (req, res) => {
+    await AuthService.revokeSession(req.cookies?.[REFRESH_COOKIE]);
+    const { httpOnly, secure, sameSite, path } = cookieOptions();
+    res.clearCookie(REFRESH_COOKIE, { httpOnly, secure, sameSite, path });
+    res.status(204).end();
+  })
+);
 router.get('/me', auth, (req, res) => {
   res.json({ userId: req.user.userId, role: req.user.role });
 });
@@ -60,7 +79,13 @@ router.post(
   })
 );
 
-router.get('/admin/me', auth, rbac(ADMIN_ROLES), (req, res) => {
-  res.json({ userId: req.user.userId, role: req.user.role });
-});
+router.get(
+  '/admin/me',
+  auth,
+  rbac(ADMIN_ROLES),
+  asyncHandler(async (req, res) => {
+    const admin = await AuthService.getAdminProfile(req.user.id);
+    res.json({ userId: req.user.id, role: req.user.role, admin });
+  })
+);
 module.exports = { router, REFRESH_COOKIE, cookieOptions };

@@ -1,6 +1,5 @@
 const { Order, OrderItem, ProductVariant, Product, Customer } = require('../models');
 const ApiError = require('../utils/ApiError');
-const logger = require('../config/logger');
 
 /**
  * Generates an immutable, human-readable tax invoice identifier.
@@ -9,6 +8,36 @@ const logger = require('../config/logger');
  * @param {object} order
  * @returns {string} Unique invoice string
  */
+const PRODUCT_SUMMARY_ATTRIBUTES = ['id', 'name', 'slug', 'price', 'primaryImage', 'isFinalSale'];
+
+/** Maps an order line with its variant and product to the public line shape. */
+const toOrderLine = (item) => ({
+  id: item.id,
+  variant_id: item.productVariantId,
+  quantity: item.quantity,
+  unit_price: Number(item.unitPrice),
+  subtotal: Number(item.subtotal),
+  product_id: item.variant?.product?.id || null,
+  product_title: item.variant?.product?.name || 'Garment Item',
+  product_slug: item.variant?.product?.slug || null,
+  primary_image: item.variant?.product?.primaryImage || null,
+  is_final_sale: Boolean(item.variant?.product?.isFinalSale),
+  sku: item.variant?.sku || '',
+  size: item.variant?.size || null,
+  color: item.variant?.color || null,
+});
+
+/**
+ * A registered customer may read only their own orders; a guest order is readable only with
+ * its guest token. Anything else is reported as "not found" so order ids cannot be probed.
+ */
+const canReadOrder = (order, customerId, guestToken) => {
+  if (order.customerId) {
+    return Boolean(customerId) && Number(order.customerId) === Number(customerId);
+  }
+  return Boolean(guestToken) && order.guestOrderToken === guestToken;
+};
+
 const generateInvoiceNumber = (order) => {
   const date = order.orderDate ? new Date(order.orderDate) : new Date();
   const year = date.getFullYear();
@@ -38,59 +67,8 @@ const parseAddress = (addr) => {
  * @param {string|null} guestToken
  * @returns {Promise<object>}
  */
-const getOrderById = async (orderId, customerId = null, guestToken = null) => {
-  if (!orderId) {
-    throw ApiError.badRequest('order_id is required');
-  }
-
-  const order = await Order.findByPk(orderId, {
-    include: [
-      {
-        model: OrderItem,
-        as: 'items',
-        include: [
-          {
-            model: ProductVariant,
-            as: 'variant',
-            include: [
-              {
-                model: Product,
-                as: 'product',
-                attributes: [
-                  'id',
-                  ['name', 'title'],
-                  'name',
-                  'slug',
-                  ['price', 'base_price'],
-                  'price',
-                ],
-              },
-            ],
-          },
-        ],
-      },
-      {
-        model: Customer,
-        as: 'customer',
-        attributes: ['id', 'name', 'email', 'phone'],
-      },
-    ],
-  });
-
-  if (!order) {
-    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
-  }
-
-  // Ownership verification: If order has customerId and caller provided customerId, must match
-  if (order.customerId && customerId && Number(order.customerId) !== Number(customerId)) {
-    throw ApiError.forbidden('You do not have permission to view this order');
-  }
-
-  // If guest order, verify guest token or email match
-  if (!order.customerId && !customerId && guestToken && order.guestOrderToken !== guestToken) {
-    throw ApiError.forbidden('Invalid guest order token');
-  }
-
+/** Public shape of an order with its lines and customer. */
+const toOrderView = (order) => {
   const plain = typeof order.toJSON === 'function' ? order.toJSON() : order;
   const invoiceNumber = generateInvoiceNumber(plain);
   const shippingAddress = parseAddress(plain.shippingAddress);
@@ -118,20 +96,63 @@ const getOrderById = async (orderId, customerId = null, guestToken = null) => {
     shipping_address: shippingAddress,
     billing_address: billingAddress,
     customer: plain.customer || null,
-    items: (plain.items || []).map((item) => ({
-      id: item.id,
-      variant_id: item.productVariantId,
-      quantity: item.quantity,
-      unit_price: Number(item.unitPrice),
-      subtotal: Number(item.subtotal),
-      product_title: item.variant?.product?.title || 'Garment Item',
-      sku: item.variant?.sku || '',
-      size: item.variant?.size || null,
-      color: item.variant?.color || null,
-    })),
+    items: (plain.items || []).map(toOrderLine),
     created_at: plain.createdAt || plain.orderDate,
     updated_at: plain.updatedAt || plain.orderDate,
   };
+};
+
+/** Order with lines, variants, products and customer. */
+const loadOrderWithDetails = async (orderId) =>
+  Order.findByPk(orderId, {
+    include: [
+      {
+        model: OrderItem,
+        as: 'items',
+        include: [
+          {
+            model: ProductVariant,
+            as: 'variant',
+            include: [
+              {
+                model: Product,
+                as: 'product',
+                attributes: PRODUCT_SUMMARY_ATTRIBUTES,
+              },
+            ],
+          },
+        ],
+      },
+      {
+        model: Customer,
+        as: 'customer',
+        attributes: ['id', 'name', 'email', 'phone'],
+      },
+    ],
+  });
+
+const getOrderById = async (orderId, customerId = null, guestToken = null) => {
+  if (!orderId) {
+    throw ApiError.badRequest('order_id is required');
+  }
+
+  const order = await loadOrderWithDetails(orderId);
+
+  if (!order) {
+    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
+  }
+
+  if (!canReadOrder(order, customerId, guestToken)) {
+    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
+  }
+  return toOrderView(order);
+};
+
+/** Admin view of any order (no ownership check; the route is restricted to managers). */
+const getOrderForAdmin = async (orderId) => {
+  const order = await loadOrderWithDetails(orderId);
+  if (!order) throw ApiError.notFound(`Order with ID '${orderId}' not found`);
+  return toOrderView(order);
 };
 
 /**
@@ -164,14 +185,7 @@ const getCustomerOrders = async (customerId, options = {}) => {
               {
                 model: Product,
                 as: 'product',
-                attributes: [
-                  'id',
-                  ['name', 'title'],
-                  'name',
-                  'slug',
-                  ['price', 'base_price'],
-                  'price',
-                ],
+                attributes: PRODUCT_SUMMARY_ATTRIBUTES,
               },
             ],
           },
@@ -200,17 +214,7 @@ const getCustomerOrders = async (customerId, options = {}) => {
       tracking_number: plain.trackingNumber,
       shipping_address: parseAddress(plain.shippingAddress),
       items_count: (plain.items || []).reduce((acc, it) => acc + (it.quantity || 1), 0),
-      items: (plain.items || []).map((item) => ({
-        id: item.id,
-        variant_id: item.productVariantId,
-        quantity: item.quantity,
-        unit_price: Number(item.unitPrice),
-        subtotal: Number(item.subtotal),
-        product_title: item.variant?.product?.title || 'Garment Item',
-        sku: item.variant?.sku || '',
-        size: item.variant?.size || null,
-        color: item.variant?.color || null,
-      })),
+      items: (plain.items || []).map(toOrderLine),
       created_at: plain.createdAt || plain.orderDate,
       updated_at: plain.updatedAt || plain.orderDate,
     };
@@ -322,50 +326,13 @@ const getOrderTracking = async (orderId, customerId = null, guestToken = null) =
   };
 };
 
-/**
- * Atomically finalizes an order upon successful payment capture.
- * Transitions order status to 'processing' and records payment intent.
- *
- * @param {number|string} orderId
- * @param {object} paymentDetails
- * @returns {Promise<object>}
- */
-const finalizeOrder = async (orderId, paymentDetails = {}) => {
-  if (!orderId) {
-    throw ApiError.badRequest('order_id is required to finalize order');
-  }
-
-  const order = await Order.findByPk(orderId, {
-    include: [{ model: OrderItem, as: 'items' }],
-  });
-
-  if (!order) {
-    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
-  }
-
-  const paymentIntentId =
-    paymentDetails.payment_intent_id || paymentDetails.id || `pi_${Date.now()}`;
-
-  await order.update({
-    status: 'processing',
-    paymentIntentId,
-  });
-
-  logger.info(`[ORDER] Order #${order.id} finalized with payment intent ${paymentIntentId}`);
-
-  return {
-    success: true,
-    order_id: order.id,
-    status: order.status,
-    payment_intent_id: paymentIntentId,
-    finalized_at: new Date().toISOString(),
-  };
-};
-
 module.exports = {
+  getOrderForAdmin,
+  toOrderView,
   getOrderById,
   getCustomerOrders,
   getOrderTracking,
-  finalizeOrder,
   generateInvoiceNumber,
+  canReadOrder,
+  toOrderLine,
 };

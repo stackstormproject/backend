@@ -1,5 +1,25 @@
 const { Return, Order, OrderItem, ProductVariant, Product } = require('../models');
 const ApiError = require('../utils/ApiError');
+
+const RETURN_WINDOW_DAYS = 30; // SRS business rule: returns within 30 days of delivery
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * SRS business rules: only delivered orders, within 30 days of delivery, never final-sale items.
+ * Throws a 400 RETURN_NOT_ELIGIBLE-style error explaining which rule failed.
+ */
+const assertReturnEligible = (order, product, now = new Date()) => {
+  if (order.status !== 'delivered') {
+    throw ApiError.badRequest('Only delivered orders can be returned or exchanged');
+  }
+  if (product && product.isFinalSale) {
+    throw ApiError.badRequest('Final-sale items cannot be returned or exchanged');
+  }
+  const deliveredAt = new Date(order.deliveryDate || order.updatedAt || order.orderDate);
+  if (now.getTime() - deliveredAt.getTime() > RETURN_WINDOW_DAYS * DAY_MS) {
+    throw ApiError.badRequest(`The ${RETURN_WINDOW_DAYS}-day return window has closed`);
+  }
+};
 const logger = require('../config/logger');
 
 /**
@@ -30,7 +50,14 @@ const requestReturn = async (params = {}) => {
   }
 
   const orderItem = await OrderItem.findByPk(orderItemId, {
-    include: [{ model: Order, as: 'order' }],
+    include: [
+      { model: Order, as: 'order' },
+      {
+        model: ProductVariant,
+        as: 'variant',
+        include: [{ model: Product, as: 'product', attributes: ['id', 'isFinalSale'] }],
+      },
+    ],
   });
 
   if (!orderItem) {
@@ -40,6 +67,8 @@ const requestReturn = async (params = {}) => {
   if (!orderItem.order || Number(orderItem.order.customerId) !== Number(customerId)) {
     throw ApiError.forbidden('You do not have permission to return this order item');
   }
+
+  assertReturnEligible(orderItem.order, orderItem.variant?.product);
 
   // Prevent multiple active return requests for the same order item
   const existingReturn = await Return.findOne({
@@ -58,6 +87,16 @@ const requestReturn = async (params = {}) => {
     const exchangeVariant = await ProductVariant.findByPk(exchangeVariantId);
     if (!exchangeVariant) {
       throw ApiError.notFound(`Exchange variant with ID '${exchangeVariantId}' not found`);
+    }
+    // Refs #155: an exchange is another size or colour of the same product, never a
+    // different (possibly dearer) product and never the same variant again.
+    if (Number(exchangeVariant.productId) !== Number(orderItem.variant?.productId)) {
+      throw ApiError.badRequest(
+        'An exchange must be for another size or colour of the same product'
+      );
+    }
+    if (Number(exchangeVariant.id) === Number(orderItem.variant?.id)) {
+      throw ApiError.badRequest('Choose a different size or colour to exchange for');
     }
   }
 
@@ -122,7 +161,7 @@ const getCustomerReturns = async (customerId, options = {}) => {
           {
             model: ProductVariant,
             as: 'variant',
-            include: [{ model: Product, as: 'product', attributes: ['id', 'title'] }],
+            include: [{ model: Product, as: 'product', attributes: ['id', 'name', 'slug'] }],
           },
         ],
       },
@@ -146,7 +185,8 @@ const getCustomerReturns = async (customerId, options = {}) => {
     reason: r.reason,
     status: r.status,
     refund_amount: Number(r.refundAmount || 0),
-    product_title: r.orderItem?.variant?.product?.title || 'Garment Item',
+    admin_note: r.adminNote || null,
+    product_title: r.orderItem?.variant?.product?.name || 'Garment Item',
     sku: r.orderItem?.variant?.sku || '',
     exchange_variant: r.exchangeVariant || null,
     created_at: r.createdAt,
@@ -206,6 +246,8 @@ const getReturnById = async (returnId, customerId) => {
 };
 
 module.exports = {
+  assertReturnEligible,
+  RETURN_WINDOW_DAYS,
   requestReturn,
   getCustomerReturns,
   getReturnById,
