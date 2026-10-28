@@ -15,7 +15,7 @@
     "test:integration": "jest tests/integration/ --runInBand --passWithNoTests",
     "pretest:integration": "sequelize-cli db:migrate --env test",
     "test:coverage": "jest --coverage",
-    "db:seed": "sequelize-cli db:seed:all && node src/seeders/seedCategoriesAndProducts.js"
+    "db:seed": "sequelize-cli db:seed:all"
   },
   "repository": {
     "type": "git",

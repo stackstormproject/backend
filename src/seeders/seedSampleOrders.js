@@ -161,3 +161,6 @@ if (require.main === module) {
 }
 
 module.exports = seedSampleOrders;
+// Also a Sequelize seeder (runs after the products); it skips itself when orders exist.
+module.exports.up = () => seedSampleOrders();
+module.exports.down = async () => {};
