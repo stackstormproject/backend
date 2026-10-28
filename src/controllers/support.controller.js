@@ -1,4 +1,4 @@
-const { ChatSession, ChatMessage, Customer } = require('../models');
+const { ChatSession, ChatMessage, Customer, Admin } = require('../models');
 const { successResponse } = require('../utils/responseFormatter');
 const ApiError = require('../utils/ApiError');
 
@@ -45,6 +45,29 @@ const getSupportSessions = async (req, res, next) => {
       (s) => (s.messages && s.messages.length > 0) || s.agentId || s.status === 'waiting'
     );
 
+    // Refs #156: name each agent message after the agent who sent it, and keep the virtual
+    // assistant's messages apart from people's.
+    const agentIds = [
+      ...new Set(
+        activeSessions.flatMap((session) =>
+          (session.messages || [])
+            .filter((m) => m.senderType === 'agent' && m.senderId)
+            .map((m) => m.senderId)
+        )
+      ),
+    ];
+    const agents = agentIds.length
+      ? await Admin.findAll({ where: { id: agentIds }, attributes: ['id', 'name'] })
+      : [];
+    const agentNames = new Map(agents.map((agent) => [agent.id, agent.name]));
+    const senderOf = (m, customer) => {
+      if (m.senderType === 'customer') {
+        return { sender: 'customer', sender_name: customer?.name || 'Customer' };
+      }
+      if (m.senderType === 'bot') return { sender: 'bot', sender_name: 'Virtual assistant' };
+      return { sender: 'agent', sender_name: agentNames.get(m.senderId) || 'Support desk' };
+    };
+
     const sessions = activeSessions.map((session) => {
       const { customer } = session;
       const sortedMessages = (session.messages || []).sort(
@@ -80,8 +103,7 @@ const getSupportSessions = async (req, res, next) => {
         wait_time_label: getRelativeTimeLabel(session.createdAt),
         messages: sortedMessages.map((m) => ({
           id: `msg-${m.id}`,
-          sender: m.senderType === 'customer' ? 'customer' : 'agent',
-          sender_name: m.senderType === 'customer' ? customer?.name || 'Customer' : 'Support Agent',
+          ...senderOf(m, customer),
           text: m.message,
           timestamp: m.createdAt ? m.createdAt.toISOString() : new Date().toISOString(),
         })),
