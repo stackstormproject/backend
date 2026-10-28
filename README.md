@@ -54,7 +54,7 @@ the support routes.
 | Area      | Routes                                                                                        | Roles     |
 | --------- | --------------------------------------------------------------------------------------------- | --------- |
 | Analytics | `GET analytics`, `GET analytics/sales-trend?days=`                                            | Managers  |
-| Orders    | `GET orders`, `GET orders/:id`, `PATCH orders/:id/status`                                     | Managers  |
+| Orders    | `GET orders`, `GET orders/:id`, `GET orders/:id/invoice`, `PATCH orders/:id/status`           | Managers  |
 | Products  | `GET/POST products`, `GET/PUT/DELETE products/:id`, `POST/PATCH/DELETE products/:id/variants` | Managers  |
 | Brands    | `GET/POST brands`, `PUT/DELETE brands/:id`                                                    | Managers  |
 | Stock     | `GET inventory`, `POST inventory/:variantId/adjust`, `GET inventory/:variantId/logs`          | Managers  |
