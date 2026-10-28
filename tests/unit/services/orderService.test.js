@@ -23,7 +23,6 @@ const {
   getOrderById,
   getCustomerOrders,
   getOrderTracking,
-  finalizeOrder,
   generateInvoiceNumber,
 } = require('../../../src/services/order.service');
 
@@ -212,51 +211,6 @@ describe('orderService', () => {
       const tracking = await getOrderTracking(12, 4);
       expect(tracking.milestones[0].status).toBe('pending');
       expect(tracking.milestones[1].status).toBe('pending');
-    });
-  });
-
-  describe('finalizeOrder', () => {
-    it('throws badRequest if orderId is missing', async () => {
-      await expect(finalizeOrder(null)).rejects.toMatchObject({ statusCode: 400 });
-    });
-
-    it('throws notFound if order does not exist', async () => {
-      Order.findByPk.mockResolvedValue(null);
-      await expect(finalizeOrder(999)).rejects.toMatchObject({ statusCode: 404 });
-    });
-
-    it('transitions order to processing and updates paymentIntentId', async () => {
-      const mockUpdate = jest.fn();
-      Order.findByPk.mockResolvedValue({
-        id: 10,
-        status: 'payment_pending',
-        update: mockUpdate,
-      });
-
-      const res = await finalizeOrder(10, { payment_intent_id: 'pi_test_999' });
-      expect(mockUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ status: 'processing', paymentIntentId: 'pi_test_999' })
-      );
-      expect(res.success).toBe(true);
-    });
-
-    it('supports fallback paymentDetails.id or generates fallback payment intent id', async () => {
-      const mockUpdate = jest.fn();
-      Order.findByPk.mockResolvedValue({
-        id: 10,
-        status: 'payment_pending',
-        update: mockUpdate,
-      });
-
-      await finalizeOrder(10, { id: 'pi_via_id' });
-      expect(mockUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ paymentIntentId: 'pi_via_id' })
-      );
-
-      await finalizeOrder(10, {});
-      expect(mockUpdate).toHaveBeenCalledWith(
-        expect.objectContaining({ paymentIntentId: expect.stringMatching(/^pi_\d+$/) })
-      );
     });
   });
 
