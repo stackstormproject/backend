@@ -1,4 +1,5 @@
 const orderService = require('../services/order.service');
+const { sendInvoice } = require('../utils/sendInvoice');
 const { successResponse } = require('../utils/responseFormatter');
 const ApiError = require('../utils/ApiError');
 
@@ -14,6 +15,21 @@ const getOrderById = async (req, res, next) => {
 
     const order = await orderService.getOrderById(id, customerId, guestToken);
     return successResponse(res, order, 'Order retrieved successfully', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Downloads the PDF invoice of a paid order; same ownership rules as reading the order.
+ * Route: GET /orders/:id/invoice (#174)
+ */
+const downloadInvoice = async (req, res, next) => {
+  try {
+    const customerId = req.user ? req.user.userId || req.user.id : null;
+    const guestToken = req.query.guest_token || req.headers['x-guest-token'] || null;
+    const order = await orderService.getOrderById(req.params.id, customerId, guestToken);
+    return await sendInvoice(res, order);
   } catch (error) {
     return next(error);
   }
@@ -56,6 +72,7 @@ const trackOrder = async (req, res, next) => {
 
 module.exports = {
   getOrderById,
+  downloadInvoice,
   getMyOrders,
   trackOrder,
 };

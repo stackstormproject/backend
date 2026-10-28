@@ -9,6 +9,7 @@ router.get('/', auth, orderController.getMyOrders);
 
 router.get('/:id/track', optionalAuth, orderController.trackOrder);
 router.get('/:id/tracking', optionalAuth, orderController.trackOrder);
+router.get('/:id/invoice', optionalAuth, orderController.downloadInvoice);
 router.get('/:id', optionalAuth, orderController.getOrderById);
 
 module.exports = router;
