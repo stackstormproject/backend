@@ -176,7 +176,7 @@ const confirmOrderPayment = async (orderId, caller = {}, paymentIntentId = null)
  * refunded without calling Stripe. `amount` is in rupees; omit it for a full refund.
  * @returns {Promise<{ refunded: boolean, provider?: string, refundId?: string }>}
  */
-const refundOrderPayment = async (order, amount = null) => {
+const refundOrderPayment = async (order, amount = null, idempotencyKey = null) => {
   if (!order.paymentIntentId) return { refunded: false };
   const value = amount === null ? Number(order.totalAmount) : Number(amount);
   if (!(value > 0)) return { refunded: false };
@@ -186,7 +186,9 @@ const refundOrderPayment = async (order, amount = null) => {
   }
   const refund = await getStripe().refunds.create(
     { payment_intent: order.paymentIntentId, amount: toMinorUnits(value) },
-    { idempotencyKey: `refund-${order.id}-${toMinorUnits(value)}` }
+    // Callers refunding one returned item pass their own key, so two refunds of the same
+    // amount on one order are not collapsed into a single refund by Stripe.
+    { idempotencyKey: idempotencyKey || `refund-${order.id}-${toMinorUnits(value)}` }
   );
   logger.info(`[PAYMENT] Refund ${refund.id} of LKR ${value} for order ${order.id}`);
   return { refunded: true, provider: STRIPE_PROVIDER, refundId: refund.id, amount: value };

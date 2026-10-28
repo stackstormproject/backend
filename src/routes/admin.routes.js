@@ -4,6 +4,7 @@ const supportController = require('../controllers/support.controller');
 const adminOrderController = require('../controllers/adminOrder.controller');
 const adminInventoryController = require('../controllers/adminInventory.controller');
 const adminProductController = require('../controllers/adminProduct.controller');
+const adminReturnController = require('../controllers/adminReturn.controller');
 const { auth } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
 const { MANAGER_ROLES, SUPPORT_ROLES } = require('../config/constants');
@@ -31,6 +32,12 @@ router.delete('/products/:id', managers, adminProductController.remove);
 router.post('/products/:id/variants', managers, adminProductController.addVariant);
 router.patch('/products/:id/variants/:variantId', managers, adminProductController.updateVariant);
 router.delete('/products/:id/variants/:variantId', managers, adminProductController.removeVariant);
+
+router.get('/returns', managers, adminReturnController.list);
+router.get('/returns/:id', managers, adminReturnController.detail);
+router.post('/returns/:id/approve', managers, adminReturnController.approve);
+router.post('/returns/:id/reject', managers, adminReturnController.reject);
+router.post('/returns/:id/receive', managers, adminReturnController.receive);
 
 router.get('/inventory', managers, adminInventoryController.list);
 router.post('/inventory/:variantId/adjust', managers, adminInventoryController.adjust);
