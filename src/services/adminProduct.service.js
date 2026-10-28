@@ -78,6 +78,8 @@ const productFields = async (body, { partial = false } = {}) => {
   }
   if (body.is_final_sale !== undefined) fields.isFinalSale = Boolean(body.is_final_sale);
   if (body.is_active !== undefined) fields.isActive = Boolean(body.is_active);
+  if (body.is_new_arrival !== undefined) fields.isNewArrival = Boolean(body.is_new_arrival);
+  if (body.is_popular !== undefined) fields.isPopular = Boolean(body.is_popular);
   if (body.primary_image !== undefined) fields.primaryImage = imageRef(body.primary_image, 'Image');
   if (body.gallery_images !== undefined) fields.galleryImages = galleryImages(body.gallery_images);
   if (body.category_id !== undefined) {
@@ -183,6 +185,8 @@ const toAdminProduct = (product, usage = new Map()) => {
     category_name: plain.categoryDetails?.name || plain.category || null,
     is_final_sale: plain.isFinalSale,
     is_active: plain.isActive,
+    is_new_arrival: Boolean(plain.isNewArrival),
+    is_popular: Boolean(plain.isPopular),
     primary_image: plain.primaryImage,
     gallery_images: plain.galleryImages || [],
     variants,
@@ -220,6 +224,8 @@ const listProducts = async (query = {}) => {
   if (query.status === 'active') where.isActive = true;
   if (query.status === 'archived') where.isActive = false;
   if (query.category_id) where.categoryId = Number(query.category_id);
+  if (query.section === 'new_arrivals') where.isNewArrival = true;
+  if (query.section === 'popular') where.isPopular = true;
 
   const { count, rows } = await Product.findAndCountAll({
     where,
