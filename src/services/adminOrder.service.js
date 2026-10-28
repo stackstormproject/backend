@@ -97,6 +97,8 @@ const listOrders = async (query = {}) => {
       total_amount: Number(order.totalAmount || 0),
       order_date: order.orderDate,
       tracking_number: order.trackingNumber,
+      // #181: lets the order list offer a status change without opening the order
+      allowed_statuses: allowedNextStatuses(order),
     })),
     pagination: { total: count, page, limit, total_pages: Math.ceil(count / limit) || 1 },
   };
