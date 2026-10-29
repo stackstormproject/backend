@@ -7,6 +7,7 @@ const adminProductController = require('../controllers/adminProduct.controller')
 const adminReturnController = require('../controllers/adminReturn.controller');
 const adminCustomerController = require('../controllers/adminCustomer.controller');
 const brandController = require('../controllers/brand.controller');
+const bannerController = require('../controllers/banner.controller');
 const { auth } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
 const { MANAGER_ROLES, SUPPORT_ROLES } = require('../config/constants');
@@ -40,6 +41,10 @@ router.get('/brands', managers, brandController.list);
 router.post('/brands', managers, brandController.create);
 router.put('/brands/:id', managers, brandController.update);
 router.delete('/brands/:id', managers, brandController.remove);
+
+router.get('/banners', managers, bannerController.list);
+router.put('/banners/:slot', managers, bannerController.upsert);
+router.delete('/banners/:slot', managers, bannerController.clear);
 
 router.get('/returns', managers, adminReturnController.list);
 router.get('/returns/:id', managers, adminReturnController.detail);
