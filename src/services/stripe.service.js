@@ -9,6 +9,7 @@ const { QueryTypes } = require('sequelize');
 const { Order, sequelize } = require('../models');
 const reservationService = require('./reservation.service');
 const { canReadOrder } = require('./order.service');
+const { storefrontUrl } = require('../utils/storefrontUrl');
 const logger = require('../config/logger');
 const ApiError = require('../utils/ApiError');
 
@@ -178,13 +179,6 @@ const confirmOrderPayment = async (orderId, caller = {}, paymentIntentId = null)
 // ---------------------------------------------------------------------------------------------
 const SESSION_TTL_SECONDS = 30 * 60; // Stripe's minimum
 const MOCK_SESSION_PREFIX = 'mock_cs_';
-
-const storefrontUrl = () =>
-  (
-    process.env.FRONTEND_CUSTOMER_URL ||
-    process.env.FRONTEND_URL ||
-    'http://localhost:5173'
-  ).replace(/\/+$/, '');
 
 /**
  * Starts payment on the hosted page for a payment_pending order.

@@ -5,9 +5,19 @@ const asyncHandler = require('../utils/asyncHandler');
 const validate = require('../middleware/validate');
 const { auth } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
-const { registerRules, loginRules } = require('../validators/auth.validators');
+const {
+  registerRules,
+  loginRules,
+  forgotPasswordRules,
+  resetPasswordRules,
+} = require('../validators/auth.validators');
+const PasswordResetService = require('../services/passwordReset.service');
 const { getRefreshTtlMs } = require('../utils/tokenGenerator');
-const { loginLimiter, registerLimiter } = require('../middleware/rateLimiter');
+const {
+  loginLimiter,
+  registerLimiter,
+  passwordResetLimiter,
+} = require('../middleware/rateLimiter');
 
 const REFRESH_COOKIE = 'refreshToken';
 const cookieOptions = () => ({
@@ -60,6 +70,30 @@ router.post(
     const { httpOnly, secure, sameSite, path } = cookieOptions();
     res.clearCookie(REFRESH_COOKIE, { httpOnly, secure, sameSite, path });
     res.status(204).end();
+  })
+);
+// #185: same answer whether or not the email has an account.
+router.post(
+  '/forgot-password',
+  passwordResetLimiter,
+  forgotPasswordRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    const { devResetUrl } = await PasswordResetService.requestReset(req.body.email);
+    res.status(202).json({
+      message: 'If an account uses this email, a reset link is on its way.',
+      ...(devResetUrl && { dev_reset_url: devResetUrl }),
+    });
+  })
+);
+router.post(
+  '/reset-password',
+  passwordResetLimiter,
+  resetPasswordRules,
+  validate,
+  asyncHandler(async (req, res) => {
+    await PasswordResetService.resetPassword(req.body.token, req.body.password);
+    res.json({ message: 'Your password is changed. Sign in with the new one.' });
   })
 );
 router.get('/me', auth, (req, res) => {

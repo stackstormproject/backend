@@ -7,10 +7,8 @@ const email = body('email')
   .bail()
   .isLength({ max: 255 })
   .toLowerCase();
-const registerRules = [
-  body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
-  email,
-  body('password')
+const newPassword = (field) =>
+  body(field)
     .isString()
     .isLength({ min: 8, max: 72 })
     .withMessage('Password must be 8-72 characters')
@@ -19,7 +17,11 @@ const registerRules = [
     .matches(/[A-Z]/)
     .withMessage('Password needs an uppercase letter')
     .matches(/\d/)
-    .withMessage('Password needs a digit'),
+    .withMessage('Password needs a digit');
+const registerRules = [
+  body('name').trim().isLength({ min: 2, max: 100 }).withMessage('Name must be 2-100 characters'),
+  email,
+  newPassword('password'),
   body('phone')
     .optional({ nullable: true })
     .trim()
@@ -30,4 +32,19 @@ const loginRules = [
   email,
   body('password').isString().notEmpty().withMessage('Password is required'),
 ];
-module.exports = { registerRules, loginRules, emailRule: email };
+// #185 password reset
+const forgotPasswordRules = [email];
+const resetPasswordRules = [
+  body('token')
+    .isString()
+    .matches(/^[a-f0-9]{64}$/)
+    .withMessage('This reset link is not valid. Ask for a new one.'),
+  newPassword('password'),
+];
+module.exports = {
+  registerRules,
+  loginRules,
+  forgotPasswordRules,
+  resetPasswordRules,
+  emailRule: email,
+};
