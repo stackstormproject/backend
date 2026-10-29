@@ -1,5 +1,5 @@
 const { Op } = require('sequelize');
-const { listProducts } = require('../../../src/services/product.service');
+const { listProducts, applySale } = require('../../../src/services/product.service');
 const { Product, Category } = require('../../../src/models');
 
 describe('productFilter Service - Multi-Faceted Query Builder & Pagination', () => {
@@ -235,6 +235,72 @@ describe('productFilter Service - Multi-Faceted Query Builder & Pagination', () 
       expect(res.products[0].category).toBe('Handcrafted Accessories');
       expect(res.products[0].primary_image).toBe('https://images.example.com/scarf.jpg');
       expect(res.products[0].variants[0].available_stock).toBe(8);
+    });
+  });
+
+  describe('Sprint 13: sale pricing', () => {
+    it('applySale: should treat null, zero or negative percentage as not on sale', () => {
+      expect(applySale(1000, null)).toEqual({ isOnSale: false, salePrice: null });
+      expect(applySale(1000, 0)).toEqual({ isOnSale: false, salePrice: null });
+      expect(applySale(1000, -5)).toEqual({ isOnSale: false, salePrice: null });
+    });
+
+    it('applySale: should compute the discounted price', () => {
+      expect(applySale(1000, 20)).toEqual({ isOnSale: true, salePrice: 800 });
+    });
+
+    it('applySale: should clamp the percentage at 90', () => {
+      expect(applySale(1000, 99)).toEqual({ isOnSale: true, salePrice: 100 });
+    });
+
+    it('should filter on section=sale using discountPercentage > 0', async () => {
+      const spy = jest.spyOn(Product, 'findAndCountAll').mockResolvedValue({ count: 0, rows: [] });
+
+      await listProducts({ section: 'sale' });
+
+      const queryArg = spy.mock.calls[0][0];
+      expect(queryArg.where[Op.and]).toEqual(
+        expect.arrayContaining([{ discountPercentage: { [Op.gt]: 0 } }])
+      );
+    });
+
+    it('should include sale fields on each listed product', async () => {
+      jest.spyOn(Product, 'findAndCountAll').mockResolvedValue({
+        count: 1,
+        rows: [
+          {
+            id: 1,
+            name: 'Batik Shirt',
+            price: 4000,
+            discountPercentage: '25.00',
+            category: 'Shirts',
+            variants: [],
+          },
+        ],
+      });
+
+      const res = await listProducts({ section: 'sale' });
+
+      expect(res.products[0]).toMatchObject({
+        is_on_sale: true,
+        discount_percentage: 25,
+        sale_price: 3000,
+      });
+    });
+
+    it('should report is_on_sale false and null fields for a regular-priced product', async () => {
+      jest.spyOn(Product, 'findAndCountAll').mockResolvedValue({
+        count: 1,
+        rows: [{ id: 2, name: 'Plain Tee', price: 1500, discountPercentage: null, variants: [] }],
+      });
+
+      const res = await listProducts({});
+
+      expect(res.products[0]).toMatchObject({
+        is_on_sale: false,
+        discount_percentage: null,
+        sale_price: null,
+      });
     });
   });
 });

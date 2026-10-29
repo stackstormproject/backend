@@ -39,10 +39,24 @@ All notable changes to this project are documented in this file.
   `PATCH .../:id/default` and `DELETE .../:id` (also detached at Stripe). Only brand, last four
   digits and expiry are stored. Migration adds `payment_methods` and
   `customers.stripe_customer_id` (#190)
+ feature/196-loyalty-earn-redeem
 - Loyalty points are earned automatically on any order whose goods subtotal reaches LKR 10,000,
   and can be redeemed at checkout as an LKR-for-LKR discount; an order records how many points
   it earned and redeemed. Migration adds `orders.loyalty_points_earned` and
   `orders.loyalty_points_redeemed` (#196)
+
+ feature/195-hero-banners
+- Hero banners: the three home page banners are managed from admin (`GET`/`PUT /admin/banners`,
+  `DELETE /admin/banners/:slot`) with a title, image, and an optional button that links
+  anywhere in the shop; `GET /banners` lists the active ones for the storefront. Migration
+  creates `banners` (#195)
+
+- Sale pricing: admin can put a product on sale with a discount percentage (1-90); the sale
+  price is shown everywhere the product appears, products can be listed by `section=sale`, and
+  the home page gets a "Sale" section alongside new arrivals and popular. Migration adds
+  `products.discount_percentage` (#194)
+ develop
+ develop
 
 ### Changed
 
