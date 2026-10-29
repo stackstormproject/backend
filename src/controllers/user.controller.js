@@ -1,4 +1,6 @@
 const userService = require('../services/user.service');
+const paymentMethodService = require('../services/paymentMethod.service');
+const stripeService = require('../services/stripe.service');
 const { successResponse } = require('../utils/responseFormatter');
 const ApiError = require('../utils/ApiError');
 
@@ -111,7 +113,44 @@ const deleteAddress = async (req, res, next) => {
   }
 };
 
+/** GET /users/me/payment-methods: cards saved while paying (#190). */
+const listPaymentMethods = async (req, res, next) => {
+  try {
+    const result = await paymentMethodService.list(getCustomerId(req));
+    return successResponse(res, result, 'Saved cards retrieved', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** PATCH /users/me/payment-methods/:id/default (#190). */
+const setDefaultPaymentMethod = async (req, res, next) => {
+  try {
+    const result = await paymentMethodService.setDefault(getCustomerId(req), req.params.id);
+    return successResponse(res, result, 'Default card updated', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** DELETE /users/me/payment-methods/:id: removes the card here and at Stripe (#190). */
+const deletePaymentMethod = async (req, res, next) => {
+  try {
+    const result = await paymentMethodService.remove(
+      getCustomerId(req),
+      req.params.id,
+      stripeService.detachPaymentMethod
+    );
+    return successResponse(res, result, 'Card removed', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
+  listPaymentMethods,
+  setDefaultPaymentMethod,
+  deletePaymentMethod,
   getProfile,
   updateProfile,
   getAddresses,

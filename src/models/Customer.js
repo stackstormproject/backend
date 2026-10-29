@@ -71,6 +71,12 @@ module.exports = (sequelize) => {
         allowNull: true,
         field: 'deleted_at',
       },
+      // #190: Stripe customer that holds the cards this customer saved
+      stripeCustomerId: {
+        type: DataTypes.STRING(64),
+        allowNull: true,
+        field: 'stripe_customer_id',
+      },
     },
     {
       sequelize,
