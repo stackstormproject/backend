@@ -23,6 +23,9 @@ All notable changes to this project are documented in this file.
   `checkout.session.completed` (#180)
 - Admin order list rows include `allowed_statuses`, so staff can change a status from the list
   (#181)
+- Password reset: `POST /auth/forgot-password` emails a one-hour, single-use link (SMTP, or
+  the log and `dev_reset_url` in development) and `POST /auth/reset-password` sets the new
+  password and signs out every session (#185)
 
 ### Changed
 
