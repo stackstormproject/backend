@@ -7,7 +7,10 @@ const adminProductController = require('../controllers/adminProduct.controller')
 const adminReturnController = require('../controllers/adminReturn.controller');
 const adminCustomerController = require('../controllers/adminCustomer.controller');
 const brandController = require('../controllers/brand.controller');
+feature/197-promo-codes
 const promoCodeController = require('../controllers/promoCode.controller');
+const bannerController = require('../controllers/banner.controller');
+ develop
 const { auth } = require('../middleware/auth');
 const { rbac } = require('../middleware/rbac');
 const { MANAGER_ROLES, SUPPORT_ROLES } = require('../config/constants');
@@ -42,10 +45,16 @@ router.post('/brands', managers, brandController.create);
 router.put('/brands/:id', managers, brandController.update);
 router.delete('/brands/:id', managers, brandController.remove);
 
+ feature/197-promo-codes
 router.get('/promo-codes', managers, promoCodeController.list);
 router.post('/promo-codes', managers, promoCodeController.create);
 router.put('/promo-codes/:id', managers, promoCodeController.update);
 router.delete('/promo-codes/:id', managers, promoCodeController.remove);
+
+router.get('/banners', managers, bannerController.list);
+router.put('/banners/:slot', managers, bannerController.upsert);
+router.delete('/banners/:slot', managers, bannerController.clear);
+develop
 
 router.get('/returns', managers, adminReturnController.list);
 router.get('/returns/:id', managers, adminReturnController.detail);
