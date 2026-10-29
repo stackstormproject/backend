@@ -3,6 +3,7 @@ const paymentMethodService = require('../services/paymentMethod.service');
 const stripeService = require('../services/stripe.service');
 const { successResponse } = require('../utils/responseFormatter');
 const ApiError = require('../utils/ApiError');
+const { uploadedFileUrl } = require('../utils/uploadedFileUrl');
 
 const getCustomerId = (req) => {
   const customerId = req.user && (req.user.userId || req.user.id);
@@ -113,26 +114,47 @@ const deleteAddress = async (req, res, next) => {
   }
 };
 
+feature/190-saved-payment-methods
 /** GET /users/me/payment-methods: cards saved while paying (#190). */
 const listPaymentMethods = async (req, res, next) => {
   try {
     const result = await paymentMethodService.list(getCustomerId(req));
     return successResponse(res, result, 'Saved cards retrieved', 200);
+
+/** POST /users/me/avatar (multipart field "avatar"): new profile picture (#189). */
+const uploadAvatar = async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req);
+    if (!req.file) {
+      throw ApiError.badRequest('Choose a JPEG, PNG or WebP photo', undefined, 'NO_FILES_UPLOADED');
+    }
+    const result = await userService.setAvatar(customerId, uploadedFileUrl(req.file));
+    return successResponse(res, result, 'Profile picture updated', 200);
+ develop
   } catch (error) {
     return next(error);
   }
 };
 
+ feature/190-saved-payment-methods
 /** PATCH /users/me/payment-methods/:id/default (#190). */
 const setDefaultPaymentMethod = async (req, res, next) => {
   try {
     const result = await paymentMethodService.setDefault(getCustomerId(req), req.params.id);
     return successResponse(res, result, 'Default card updated', 200);
+
+/** DELETE /users/me/avatar (#189). */
+const deleteAvatar = async (req, res, next) => {
+  try {
+    const result = await userService.removeAvatar(getCustomerId(req));
+    return successResponse(res, result, 'Profile picture removed', 200);
+ develop
   } catch (error) {
     return next(error);
   }
 };
 
+feature/190-saved-payment-methods
 /** DELETE /users/me/payment-methods/:id: removes the card here and at Stripe (#190). */
 const deletePaymentMethod = async (req, res, next) => {
   try {
@@ -142,15 +164,39 @@ const deletePaymentMethod = async (req, res, next) => {
       stripeService.detachPaymentMethod
     );
     return successResponse(res, result, 'Card removed', 200);
+
+/** GET /users/me/preferences (#189). */
+const getPreferences = async (req, res, next) => {
+  try {
+    const result = await userService.getPreferences(getCustomerId(req));
+    return successResponse(res, result, 'Preferences retrieved', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** PATCH /users/me/preferences with only the preferences to change (#189). */
+const updatePreferences = async (req, res, next) => {
+  try {
+    const result = await userService.updatePreferences(getCustomerId(req), req.body);
+    return successResponse(res, result, 'Preferences saved', 200);
+ develop
   } catch (error) {
     return next(error);
   }
 };
 
 module.exports = {
+feature/190-saved-payment-methods
   listPaymentMethods,
   setDefaultPaymentMethod,
   deletePaymentMethod,
+
+  uploadAvatar,
+  deleteAvatar,
+  getPreferences,
+  updatePreferences,
+ develop
   getProfile,
   updateProfile,
   getAddresses,
