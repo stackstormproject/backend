@@ -364,11 +364,16 @@ const listProducts = async ({
   }
 
   if (search) {
+    // FR-001: name, description, brand and category; wildcards in the text are literal (#188)
+    const term = `%${String(search)
+      .trim()
+      .replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     andConditions.push({
       [Op.or]: [
-        { name: { [Op.iLike]: `%${search}%` } },
-        { description: { [Op.iLike]: `%${search}%` } },
-        { category: { [Op.iLike]: `%${search}%` } },
+        { name: { [Op.iLike]: term } },
+        { description: { [Op.iLike]: term } },
+        { brand: { [Op.iLike]: term } },
+        { category: { [Op.iLike]: term } },
       ],
     });
   }
