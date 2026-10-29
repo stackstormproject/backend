@@ -2,6 +2,11 @@ const { Loyalty, LoyaltyTransaction, Customer, sequelize } = require('../models'
 const ApiError = require('../utils/ApiError');
 const logger = require('../config/logger');
 
+// Sprint 13: an order earns points only once its goods subtotal reaches this threshold, and
+// redeemed points are worth this many LKR each when spent as a checkout discount.
+const EARN_THRESHOLD_LKR = 10000;
+const POINT_VALUE_LKR = 1;
+
 const TIER_MULTIPLIERS = {
   silver: 1.0,
   gold: 1.5,
@@ -186,11 +191,110 @@ const redeemPoints = async (customerId, pointsToRedeem, description = 'Points re
   };
 };
 
+/**
+ * Prices spending `points` as a checkout discount, without touching the balance yet (the
+ * balance is only spent once the order is actually paid, in settleOrderLoyalty). Throws if
+ * the customer does not have that many points.
+ *
+ * @param {number|string} customerId
+ * @param {number} points
+ * @returns {Promise<number>} the discount in LKR
+ */
+const priceRedemption = async (customerId, points) => {
+  const requested = parseInt(points, 10);
+  if (!requested || requested <= 0) return 0;
+  const account = await Loyalty.findOne({ where: { customerId } });
+  if (!account || account.currentPoints < requested) {
+    throw ApiError.badRequest('Not enough loyalty points for this redemption');
+  }
+  return Number((requested * POINT_VALUE_LKR).toFixed(2));
+};
+
+/**
+ * Settles the loyalty side of a paid order (Sprint 13): spends any points the shopper chose
+ * to redeem at checkout, and awards points when the goods subtotal is at least
+ * {@link EARN_THRESHOLD_LKR}. Called once, from the same payment-confirmation step that
+ * marks the order paid, so it never runs twice for one order.
+ *
+ * @param {object} order - an Order instance with customerId and loyaltyPointsRedeemed
+ * @param {number} goodsSubtotal - the order's goods subtotal, before shipping and discounts
+ * @returns {Promise<{earned: number, redeemed: number}>}
+ */
+const settleOrderLoyalty = async (order, goodsSubtotal) => {
+  if (!order.customerId) return { earned: 0, redeemed: 0 };
+
+  const redeemed = Number(order.loyaltyPointsRedeemed) || 0;
+  const subtotal = Number(goodsSubtotal) || 0;
+  const earned =
+    subtotal >= EARN_THRESHOLD_LKR
+      ? await getLoyaltyAccount(order.customerId).then((a) => calculatePoints(subtotal, a.tier))
+      : 0;
+  if (!redeemed && !earned) return { earned: 0, redeemed: 0 };
+
+  await sequelize.transaction(async (t) => {
+    const account = await Loyalty.findOne({
+      where: { customerId: order.customerId },
+      transaction: t,
+      lock: t.LOCK.UPDATE,
+    });
+    if (!account) return;
+    if (redeemed && account.currentPoints < redeemed) {
+      // Balance moved since checkout (another order redeemed it first); skip rather than fail
+      // an order that has already been paid for.
+      logger.warn(
+        `[LOYALTY] Order ${order.id}: customer ${order.customerId} no longer has ${redeemed} points to redeem`
+      );
+      return;
+    }
+    const balance = account.currentPoints - redeemed + earned;
+    await account.update(
+      {
+        currentPoints: balance,
+        lifetimePoints: account.lifetimePoints + earned,
+      },
+      { transaction: t }
+    );
+    if (redeemed) {
+      await LoyaltyTransaction.create(
+        {
+          customerId: order.customerId,
+          points: -redeemed,
+          transactionType: 'redeemed',
+          description: `Redeemed at checkout on order #${order.id}`,
+        },
+        { transaction: t }
+      );
+    }
+    if (earned) {
+      await LoyaltyTransaction.create(
+        {
+          customerId: order.customerId,
+          points: earned,
+          transactionType: 'earned',
+          description: `Earned on order #${order.id}`,
+        },
+        { transaction: t }
+      );
+    }
+    await Customer.update(
+      { loyaltyPoints: balance },
+      { where: { id: order.customerId }, transaction: t }
+    );
+  });
+
+  logger.info(`[LOYALTY] Order ${order.id}: earned ${earned}, redeemed ${redeemed}`);
+  return { earned, redeemed };
+};
+
 module.exports = {
   getLoyaltyAccount,
   getLoyaltyTransactions,
   redeemPoints,
   calculatePoints,
+  priceRedemption,
+  settleOrderLoyalty,
   TIER_MULTIPLIERS,
   TIER_BENEFITS,
+  EARN_THRESHOLD_LKR,
+  POINT_VALUE_LKR,
 };

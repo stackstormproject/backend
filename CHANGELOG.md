@@ -40,11 +40,19 @@ All notable changes to this project are documented in this file.
   digits and expiry are stored. Migration adds `payment_methods` and
   `customers.stripe_customer_id` (#190)
  feature/198-checkout-promo-loyalty-integration
+ feature/198-checkout-promo-loyalty-integration
 - Checkout accepts a promo code and/or loyalty-point redemption: `POST /checkout/promo/validate`
   prices a code against the cart before payment, and `POST /checkout` applies both to the order
   total (capped at the subtotal). Points are only spent and a code's usage is only counted once
   the order is actually paid, from the same step that marks it paid, so an abandoned checkout
   never burns either (#198)
+
+ feature/196-loyalty-earn-redeem
+- Loyalty points are earned automatically on any order whose goods subtotal reaches LKR 10,000,
+  and can be redeemed at checkout as an LKR-for-LKR discount; an order records how many points
+  it earned and redeemed. Migration adds `orders.loyalty_points_earned` and
+  `orders.loyalty_points_redeemed` (#196)
+ develop
 
  feature/195-hero-banners
 - Hero banners: the three home page banners are managed from admin (`GET`/`PUT /admin/banners`,
