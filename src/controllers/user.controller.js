@@ -1,6 +1,7 @@
 const userService = require('../services/user.service');
 const { successResponse } = require('../utils/responseFormatter');
 const ApiError = require('../utils/ApiError');
+const { uploadedFileUrl } = require('../utils/uploadedFileUrl');
 
 const getCustomerId = (req) => {
   const customerId = req.user && (req.user.userId || req.user.id);
@@ -111,7 +112,55 @@ const deleteAddress = async (req, res, next) => {
   }
 };
 
+/** POST /users/me/avatar (multipart field "avatar"): new profile picture (#189). */
+const uploadAvatar = async (req, res, next) => {
+  try {
+    const customerId = getCustomerId(req);
+    if (!req.file) {
+      throw ApiError.badRequest('Choose a JPEG, PNG or WebP photo', undefined, 'NO_FILES_UPLOADED');
+    }
+    const result = await userService.setAvatar(customerId, uploadedFileUrl(req.file));
+    return successResponse(res, result, 'Profile picture updated', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** DELETE /users/me/avatar (#189). */
+const deleteAvatar = async (req, res, next) => {
+  try {
+    const result = await userService.removeAvatar(getCustomerId(req));
+    return successResponse(res, result, 'Profile picture removed', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** GET /users/me/preferences (#189). */
+const getPreferences = async (req, res, next) => {
+  try {
+    const result = await userService.getPreferences(getCustomerId(req));
+    return successResponse(res, result, 'Preferences retrieved', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** PATCH /users/me/preferences with only the preferences to change (#189). */
+const updatePreferences = async (req, res, next) => {
+  try {
+    const result = await userService.updatePreferences(getCustomerId(req), req.body);
+    return successResponse(res, result, 'Preferences saved', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
+  uploadAvatar,
+  deleteAvatar,
+  getPreferences,
+  updatePreferences,
   getProfile,
   updateProfile,
   getAddresses,
