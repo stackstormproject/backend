@@ -78,6 +78,15 @@ Email goes out through any SMTP server (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `
 `SMTP_HOST` nothing is sent: the email is written to the backend log and, outside production,
 the response includes `dev_reset_url` so the storefront can show the link.
 
+### Saved cards
+
+Signed-in shoppers pay as their own Stripe customer, so Stripe Checkout offers "save this card"
+and shows cards saved earlier. When a saved card was used, `confirm-session` records its brand,
+last four digits and expiry in `payment_methods`; the card number never reaches this server.
+On the test gateway, `save_card: true` saves a labelled test Visa ending 4242.
+`GET /api/v1/users/me/payment-methods` lists them (default first), `PATCH .../:id/default`
+changes the default and `DELETE .../:id` removes the card here and detaches it at Stripe.
+
 ## Shop sections and brands
 
 `GET /products?section=new_arrivals|popular` lists the products staff marked for the home page
