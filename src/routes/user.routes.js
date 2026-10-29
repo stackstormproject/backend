@@ -14,6 +14,11 @@ router.put('/profile', userController.updateProfile);
 router.patch('/me', userController.updateProfile);
 router.patch('/profile', userController.updateProfile);
 
+// #190: cards saved on the payment page (only brand, last 4 digits and expiry are stored)
+router.get('/me/payment-methods', userController.listPaymentMethods);
+router.patch('/me/payment-methods/:id/default', userController.setDefaultPaymentMethod);
+router.delete('/me/payment-methods/:id', userController.deletePaymentMethod);
+
 // #189: profile picture (one JPEG/PNG/WebP up to 5 MB) and shopping preferences
 router.post('/me/avatar', upload.single('avatar'), userController.uploadAvatar);
 router.delete('/me/avatar', userController.deleteAvatar);
