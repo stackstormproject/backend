@@ -352,5 +352,132 @@ describe('checkoutService', () => {
       ).rejects.toThrow('db down');
       expect(release).toHaveBeenCalledWith('r9');
     });
+
+    describe('Sprint 13: promo codes and loyalty redemption', () => {
+      const { PromoCode, Loyalty } = require('../../../src/models');
+
+      beforeEach(() => {
+        jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([stockedVariant()]);
+        jest.spyOn(reservationService, 'reserveStock').mockResolvedValue({ reservation_id: 'r1' });
+        jest.spyOn(Order, 'create').mockResolvedValue({ id: 20, status: 'payment_pending' });
+        jest.spyOn(OrderItem, 'bulkCreate').mockResolvedValue([]);
+      });
+
+      it('should apply a valid promo code discount to the order total', async () => {
+        jest.spyOn(PromoCode, 'findOne').mockResolvedValue({
+          id: 7,
+          code: 'WELCOME10',
+          discountType: 'percentage',
+          discountValue: '10.00',
+          minOrderAmount: '0.00',
+          maxDiscountAmount: null,
+          startDate: new Date('2020-01-01'),
+          endDate: new Date('2099-01-01'),
+          usageLimit: null,
+          timesUsed: 0,
+          isActive: true,
+        });
+
+        const result = await initiateCheckout({
+          customerId: 4,
+          shippingAddress: validAddress,
+          items: [{ variantId: 1, quantity: 1 }],
+          promoCode: 'welcome10',
+        });
+
+        expect(result.breakdown.discount_amount).toBe(300);
+        expect(result.breakdown.total_amount).toBe(3150);
+        expect(Order.create).toHaveBeenCalledWith(
+          expect.objectContaining({ promoCodeId: 7, discountAmount: 300 }),
+          expect.anything()
+        );
+      });
+
+      it('should reject an invalid promo code before reserving stock', async () => {
+        jest.spyOn(PromoCode, 'findOne').mockResolvedValue(null);
+        const reserve = jest.spyOn(reservationService, 'reserveStock');
+
+        await expect(
+          initiateCheckout({
+            customerId: 4,
+            shippingAddress: validAddress,
+            items: [{ variantId: 1, quantity: 1 }],
+            promoCode: 'BOGUS',
+          })
+        ).rejects.toMatchObject({ statusCode: 400 });
+        expect(reserve).not.toHaveBeenCalled();
+      });
+
+      it('should require sign-in to redeem loyalty points', async () => {
+        await expect(
+          initiateCheckout({
+            customerId: null,
+            guestEmail: 'guest@example.com',
+            shippingAddress: validAddress,
+            items: [{ variantId: 1, quantity: 1 }],
+            redeemPoints: 100,
+          })
+        ).rejects.toMatchObject({ message: expect.stringMatching(/Sign in/) });
+      });
+
+      it('should reject redeeming more points than the customer has', async () => {
+        jest.spyOn(Loyalty, 'findOne').mockResolvedValue({ customerId: 4, currentPoints: 50 });
+
+        await expect(
+          initiateCheckout({
+            customerId: 4,
+            shippingAddress: validAddress,
+            items: [{ variantId: 1, quantity: 1 }],
+            redeemPoints: 100,
+          })
+        ).rejects.toMatchObject({ statusCode: 400 });
+      });
+
+      it('should price redeemed points as an LKR-for-LKR discount and record it on the order', async () => {
+        jest.spyOn(Loyalty, 'findOne').mockResolvedValue({ customerId: 4, currentPoints: 500 });
+
+        const result = await initiateCheckout({
+          customerId: 4,
+          shippingAddress: validAddress,
+          items: [{ variantId: 1, quantity: 1 }],
+          redeemPoints: 200,
+        });
+
+        expect(result.breakdown.discount_amount).toBe(200);
+        expect(Order.create).toHaveBeenCalledWith(
+          expect.objectContaining({ loyaltyPointsRedeemed: 200, discountAmount: 200 }),
+          expect.anything()
+        );
+      });
+
+      it('should cap the combined promo + loyalty discount at the subtotal', async () => {
+        jest.spyOn(PromoCode, 'findOne').mockResolvedValue({
+          id: 7,
+          code: 'BIG50',
+          discountType: 'fixed_amount',
+          discountValue: '2000.00',
+          minOrderAmount: '0.00',
+          maxDiscountAmount: null,
+          startDate: new Date('2020-01-01'),
+          endDate: new Date('2099-01-01'),
+          usageLimit: null,
+          timesUsed: 0,
+          isActive: true,
+        });
+        jest.spyOn(Loyalty, 'findOne').mockResolvedValue({ customerId: 4, currentPoints: 5000 });
+
+        const result = await initiateCheckout({
+          customerId: 4,
+          shippingAddress: validAddress,
+          items: [{ variantId: 1, quantity: 1 }],
+          promoCode: 'BIG50',
+          redeemPoints: 2000,
+        });
+
+        // Subtotal is 3000; a 2000 promo + 2000-point redemption would exceed it.
+        expect(result.breakdown.discount_amount).toBe(3000);
+        expect(result.breakdown.total_amount).toBe(450);
+      });
+    });
   });
 });

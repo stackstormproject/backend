@@ -20,8 +20,18 @@ jest.mock('../../../src/services/reservation.service', () => ({
   confirmReservation: jest.fn(),
 }));
 
+jest.mock('../../../src/services/loyalty.service', () => ({
+  settleOrderLoyalty: jest.fn(),
+}));
+
+jest.mock('../../../src/services/promoCode.service', () => ({
+  recordUsage: jest.fn(),
+}));
+
 const { Order, sequelize } = require('../../../src/models');
 const reservationService = require('../../../src/services/reservation.service');
+const loyaltyService = require('../../../src/services/loyalty.service');
+const promoCodeService = require('../../../src/services/promoCode.service');
 const stripeService = require('../../../src/services/stripe.service');
 
 const REAL_KEY = 'sk_test_51RealLookingKey';
@@ -49,6 +59,8 @@ describe('stripeService', () => {
     delete process.env.STRIPE_SECRET_KEY;
     sequelize.query.mockResolvedValue([{ id: 'res_1' }]);
     reservationService.confirmReservation.mockResolvedValue(true);
+    loyaltyService.settleOrderLoyalty.mockResolvedValue({ earned: 0, redeemed: 0 });
+    promoCodeService.recordUsage.mockResolvedValue();
   });
 
   afterAll(() => {
@@ -354,6 +366,63 @@ describe('stripeService', () => {
         'refund-10-885000',
       ]);
       expect(mockRefundCreate.mock.calls[0][0]).toEqual({ payment_intent: 'pi_1', amount: 300000 });
+    });
+  });
+
+  describe('markOrderPaid (Sprint 13: loyalty and promo settlement)', () => {
+    const paidOrder = (overrides = {}) =>
+      makeOrder({
+        shippingCost: 450,
+        discountAmount: 300,
+        totalAmount: 3150,
+        promoCodeId: 7,
+        ...overrides,
+      });
+
+    it('should be idempotent and not settle loyalty or promo twice', async () => {
+      const result = await stripeService.markOrderPaid(makeOrder({ status: 'processing' }), 'pi_1');
+
+      expect(result).toEqual({ orderId: 10, status: 'processing' });
+      expect(loyaltyService.settleOrderLoyalty).not.toHaveBeenCalled();
+      expect(promoCodeService.recordUsage).not.toHaveBeenCalled();
+    });
+
+    it('should reject marking an order paid from a non-payable status', async () => {
+      await expect(
+        stripeService.markOrderPaid(makeOrder({ status: 'cancelled' }), 'pi_1')
+      ).rejects.toMatchObject({ statusCode: 409 });
+    });
+
+    it('should settle loyalty on the goods subtotal (total - shipping + discount) and record promo usage', async () => {
+      const order = paidOrder();
+
+      await stripeService.markOrderPaid(order, 'pi_1');
+
+      expect(order.status).toBe('processing');
+      expect(loyaltyService.settleOrderLoyalty).toHaveBeenCalledWith(order, 3000);
+      expect(promoCodeService.recordUsage).toHaveBeenCalledWith(7);
+    });
+
+    it('should still mark the order paid when loyalty settlement fails', async () => {
+      loyaltyService.settleOrderLoyalty.mockRejectedValue(new Error('balance locked'));
+
+      const result = await stripeService.markOrderPaid(paidOrder(), 'pi_1');
+
+      expect(result).toEqual({ orderId: 10, status: 'processing' });
+    });
+
+    it('should still mark the order paid when promo usage recording fails', async () => {
+      promoCodeService.recordUsage.mockRejectedValue(new Error('db down'));
+
+      const result = await stripeService.markOrderPaid(paidOrder(), 'pi_1');
+
+      expect(result).toEqual({ orderId: 10, status: 'processing' });
+    });
+
+    it('should skip promo usage recording for an order with no promo code', async () => {
+      await stripeService.markOrderPaid(paidOrder({ promoCodeId: null }), 'pi_1');
+
+      expect(promoCodeService.recordUsage).toHaveBeenCalledWith(null);
     });
   });
 });
