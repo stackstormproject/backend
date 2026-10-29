@@ -7,6 +7,8 @@
 const crypto = require('crypto');
 const { Order, OrderItem, ProductVariant, Product, sequelize } = require('../models');
 const reservationService = require('./reservation.service');
+const promoCodeService = require('./promoCode.service');
+const loyaltyService = require('./loyalty.service');
 const ApiError = require('../utils/ApiError');
 const logger = require('../config/logger');
 
@@ -205,13 +207,38 @@ const initiateCheckout = async (checkoutData = {}) => {
     };
   });
 
-  // 5. Calculate shipping & totals
+  // 5. Price any promo code and loyalty-point redemption (Sprint 13, FR-015)
+  const rawPromoCode = (checkoutData.promoCode || checkoutData.promo_code || '').trim();
+  const rawRedeemPoints = checkoutData.redeemPoints ?? checkoutData.redeem_points;
+
+  let promoCodeId = null;
+  let appliedPromoCode = null;
+  let promoDiscount = 0;
+  if (rawPromoCode) {
+    const priced = await promoCodeService.validateAndPrice(rawPromoCode, subtotal);
+    promoCodeId = priced.promoCodeId;
+    appliedPromoCode = priced.code;
+    promoDiscount = priced.discountAmount;
+  }
+
+  let loyaltyPointsRedeemed = 0;
+  let loyaltyDiscount = 0;
+  const requestedPoints = parseInt(rawRedeemPoints, 10);
+  if (requestedPoints > 0) {
+    if (!customerId) {
+      throw ApiError.badRequest('Sign in to redeem loyalty points');
+    }
+    loyaltyDiscount = await loyaltyService.priceRedemption(customerId, requestedPoints);
+    loyaltyPointsRedeemed = requestedPoints;
+  }
+
+  // 6. Calculate shipping & totals
   const shippingFee = calculateShippingFee(subtotal, shippingMethod);
-  const discountAmount = 0.0;
+  const discountAmount = Number(Math.min(promoDiscount + loyaltyDiscount, subtotal).toFixed(2));
   const totalAmount = Number((subtotal + shippingFee - discountAmount).toFixed(2));
   const guestOrderToken = !customerId ? crypto.randomBytes(16).toString('hex') : null;
 
-  // 6. 15-Minute Temporary Stock Reservation
+  // 7. 15-Minute Temporary Stock Reservation
   const reservationResult = await reservationService.reserveStock({
     customerId,
     items: normalizedItems,
@@ -219,7 +246,7 @@ const initiateCheckout = async (checkoutData = {}) => {
 
   const reservationId = reservationResult.reservation_id;
 
-  // 7. Persist Order and Line Items in Managed DB Transaction
+  // 8. Persist Order and Line Items in Managed DB Transaction
   let createdOrder;
   const createOrderAction = async (t) => {
     const orderRecord = await Order.create(
@@ -237,6 +264,8 @@ const initiateCheckout = async (checkoutData = {}) => {
         discountAmount,
         totalAmount,
         notes,
+        promoCodeId,
+        loyaltyPointsRedeemed,
       },
       { transaction: t }
     );
@@ -289,11 +318,15 @@ const initiateCheckout = async (checkoutData = {}) => {
       subtotal: Number(subtotal.toFixed(2)),
       shipping_fee: Number(shippingFee.toFixed(2)),
       discount_amount: Number(discountAmount.toFixed(2)),
+      promo_discount: Number(promoDiscount.toFixed(2)),
+      loyalty_discount: Number(loyaltyDiscount.toFixed(2)),
       total_amount: totalAmount,
       formatted_subtotal: `LKR ${subtotal.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
       formatted_shipping: `LKR ${shippingFee.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
       formatted_total: `LKR ${totalAmount.toLocaleString('en-US', { minimumFractionDigits: 2 })}`,
     },
+    promo_code: appliedPromoCode,
+    loyalty_points_redeemed: loyaltyPointsRedeemed,
     items: resolvedItems,
     shipping_address: shippingAddressSnapshot,
     billing_address: billingAddressSnapshot,
