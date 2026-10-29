@@ -1,8 +1,6 @@
-const crypto = require('crypto');
 const ApiError = require('../utils/ApiError');
-const { bucketName, region } = require('../config/s3');
 const logger = require('../config/logger');
-const { mediaUrl } = require('../config/storage');
+const { uploadedFileUrl } = require('../utils/uploadedFileUrl');
 
 /**
  * Controller to handle batch image uploads to S3 / Object Storage
@@ -21,34 +19,7 @@ const uploadImages = async (req, res, next) => {
       );
     }
 
-    const cdnBase = process.env.CDN_URL || process.env.AWS_CLOUDFRONT_URL;
-
-    const urls = req.files.map((file) => {
-      // Saved on the backend's own disk (no S3 bucket configured)
-      if (file.path && file.filename) return mediaUrl(`products/${file.filename}`);
-
-      if (file.location) {
-        if (cdnBase && file.key) {
-          return `${cdnBase.replace(/\/+$/, '')}/${file.key}`;
-        }
-        return file.location;
-      }
-
-      // In non-test environments, missing file.location indicates an S3 upload failure (do not fail silently)
-      if (process.env.NODE_ENV !== 'test') {
-        throw ApiError.internal(
-          'File upload to storage failed: missing upload location from S3',
-          undefined,
-          'S3_UPLOAD_FAILED'
-        );
-      }
-
-      const fileKey = file.key || `products/${crypto.randomUUID()}-${file.originalname}`;
-      if (cdnBase) {
-        return `${cdnBase.replace(/\/+$/, '')}/${fileKey}`;
-      }
-      return `https://${bucketName}.s3.${region}.amazonaws.com/${fileKey}`;
-    });
+    const urls = req.files.map(uploadedFileUrl);
 
     logger.info(`[UPLOAD] Successfully uploaded ${urls.length} image(s)`);
 
