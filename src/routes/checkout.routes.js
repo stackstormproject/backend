@@ -35,4 +35,11 @@ router.delete('/release/:reservationId', checkoutController.release);
  */
 router.post('/confirm/:reservationId', checkoutController.confirm);
 
+/**
+ * @route   POST /checkout/promo/validate
+ * @desc    Check a promo code against the bag subtotal before committing to checkout (#15)
+ * @access  Public (Guest or Authenticated)
+ */
+router.post('/promo/validate', checkoutController.validatePromo);
+
 module.exports = router;

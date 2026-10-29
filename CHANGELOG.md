@@ -26,30 +26,24 @@ All notable changes to this project are documented in this file.
 - Password reset: `POST /auth/forgot-password` emails a one-hour, single-use link (SMTP, or
   the log and `dev_reset_url` in development) and `POST /auth/reset-password` sets the new
   password and signs out every session (#185)
- feature/190-saved-payment-methods
- feature/190-saved-payment-methods
-- Saved cards: signed-in shoppers can tick "save" on Stripe Checkout (each customer gets a
-  Stripe customer) or on the test gateway (`save_card: true`); `GET /users/me/payment-methods`,
-  `PATCH .../:id/default` and `DELETE .../:id` (also detached at Stripe). Only brand, last four
-  digits and expiry are stored. Migration adds `payment_methods` and
-  `customers.stripe_customer_id` (#190)
-
- feature/189-profile-picture-preferences
+- Search suggestions `GET /products/suggest?q=` (products, categories and brands as you type)
+  and filter options `GET /products/facets` (in-stock colours and sizes); full search also
+  matches the brand and treats `%` and `_` literally (#188)
 - Profile picture: `POST /users/me/avatar` (field `avatar`, JPEG/PNG/WebP up to 5 MB) and
   `DELETE /users/me/avatar`; shopping preferences `GET`/`PATCH /users/me/preferences` (order
   emails, sale and back-in-stock alerts, newsletter, push, preferred payment and size); both
   appear on `GET /users/me`. Migration adds `customers.avatar_url` and `customers.preferences`
   (#189)
- develop
-
-- Search suggestions `GET /products/suggest?q=` (products, categories and brands as you type)
-  and filter options `GET /products/facets` (in-stock colours and sizes); full search also
-  matches the brand and treats `%` and `_` literally (#188)
- feature/190-saved-payment-methods
-develop
-
- develop
- develop
+- Saved cards: signed-in shoppers can tick "save" on Stripe Checkout (each customer gets a
+  Stripe customer) or on the test gateway (`save_card: true`); `GET /users/me/payment-methods`,
+  `PATCH .../:id/default` and `DELETE .../:id` (also detached at Stripe). Only brand, last four
+  digits and expiry are stored. Migration adds `payment_methods` and
+  `customers.stripe_customer_id` (#190)
+- Checkout accepts a promo code and/or loyalty-point redemption: `POST /checkout/promo/validate`
+  prices a code against the cart before payment, and `POST /checkout` applies both to the order
+  total (capped at the subtotal). Points are only spent and a code's usage is only counted once
+  the order is actually paid, from the same step that marks it paid, so an abandoned checkout
+  never burns either (#198)
 
 ### Changed
 

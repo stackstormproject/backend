@@ -1,5 +1,6 @@
 const checkoutService = require('../services/checkout.service');
 const reservationService = require('../services/reservation.service');
+const promoCodeService = require('../services/promoCode.service');
 const { successResponse } = require('../utils/responseFormatter');
 
 /**
@@ -68,9 +69,24 @@ const confirm = async (req, res, next) => {
   }
 };
 
+/**
+ * Checks a promo code against the shopper's current bag subtotal before they commit to
+ * checkout (Sprint 13, FR-015). The server prices it again at initiate time regardless.
+ */
+const validatePromo = async (req, res, next) => {
+  try {
+    const { code, subtotal } = req.body;
+    const result = await promoCodeService.validateAndPrice(code, subtotal);
+    return successResponse(res, result, 'Promo code applied', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   initiate,
   reserve,
   release,
   confirm,
+  validatePromo,
 };
