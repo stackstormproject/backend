@@ -108,6 +108,19 @@ module.exports = (sequelize) => {
         allowNull: true,
         field: 'promo_code_id',
       },
+      // Sprint 13: loyalty points this order granted (on payment) and spent as a discount.
+      loyaltyPointsEarned: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'loyalty_points_earned',
+      },
+      loyaltyPointsRedeemed: {
+        type: DataTypes.INTEGER,
+        allowNull: false,
+        defaultValue: 0,
+        field: 'loyalty_points_redeemed',
+      },
     },
     {
       sequelize,
