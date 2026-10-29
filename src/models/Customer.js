@@ -71,7 +71,6 @@ module.exports = (sequelize) => {
         allowNull: true,
         field: 'deleted_at',
       },
- feature/190-saved-payment-methods
       // #190: Stripe customer that holds the cards this customer saved
       stripeCustomerId: {
         type: DataTypes.STRING(64),
@@ -82,7 +81,6 @@ module.exports = (sequelize) => {
       // #189: profile picture link and shopping preferences (see services/preferences)
       avatarUrl: { type: DataTypes.STRING(500), allowNull: true, field: 'avatar_url' },
       preferences: { type: DataTypes.JSONB, allowNull: false, defaultValue: {} },
-develop
     },
     {
       sequelize,

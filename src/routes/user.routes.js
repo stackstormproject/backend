@@ -14,7 +14,6 @@ router.put('/profile', userController.updateProfile);
 router.patch('/me', userController.updateProfile);
 router.patch('/profile', userController.updateProfile);
 
-feature/190-saved-payment-methods
 // #190: cards saved on the payment page (only brand, last 4 digits and expiry are stored)
 router.get('/me/payment-methods', userController.listPaymentMethods);
 router.patch('/me/payment-methods/:id/default', userController.setDefaultPaymentMethod);
@@ -26,7 +25,6 @@ router.delete('/me/avatar', userController.deleteAvatar);
 router.get('/me/preferences', userController.getPreferences);
 router.put('/me/preferences', userController.updatePreferences);
 router.patch('/me/preferences', userController.updatePreferences);
-develop
 
 router.get('/addresses', userController.getAddresses);
 router.post('/addresses', userController.addAddress);
