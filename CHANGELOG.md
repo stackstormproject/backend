@@ -26,6 +26,11 @@ All notable changes to this project are documented in this file.
 - Password reset: `POST /auth/forgot-password` emails a one-hour, single-use link (SMTP, or
   the log and `dev_reset_url` in development) and `POST /auth/reset-password` sets the new
   password and signs out every session (#185)
+- Profile picture: `POST /users/me/avatar` (field `avatar`, JPEG/PNG/WebP up to 5 MB) and
+  `DELETE /users/me/avatar`; shopping preferences `GET`/`PATCH /users/me/preferences` (order
+  emails, sale and back-in-stock alerts, newsletter, push, preferred payment and size); both
+  appear on `GET /users/me`. Migration adds `customers.avatar_url` and `customers.preferences`
+  (#189)
 
 ### Changed
 

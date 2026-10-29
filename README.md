@@ -46,6 +46,15 @@ Checkout sends the shopper to Stripe Checkout and Stripe sends them back to
 verify the payment. Set `STRIPE_SECRET_KEY` (test keys work) and `FRONTEND_URL`. Without a
 Stripe key, outside production, the storefront's labelled test gateway is used instead.
 
+## Profile picture and preferences
+
+`POST /api/v1/users/me/avatar` takes one image in the multipart field `avatar` and stores it
+like product photos (backend disk or S3); `DELETE` removes it. `PATCH /api/v1/users/me/preferences`
+saves only the keys sent: `order_updates_email`, `sale_alerts`, `back_in_stock_alerts`,
+`newsletter` (off until the customer opts in), `push_notifications`, `preferred_payment`
+(`card` or `cod`) and `preferred_size`. Unknown keys or wrong types answer 400 with a
+`details` entry per field.
+
 ## Password reset
 
 `POST /api/v1/auth/forgot-password` with `{ email }` always answers 202 with the same message,

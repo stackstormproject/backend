@@ -1,5 +1,6 @@
 const { Customer, Address, Loyalty, sequelize } = require('../models');
 const ApiError = require('../utils/ApiError');
+const preferencesService = require('./preferences.service');
 
 /**
  * Validates international E.164 or common domestic phone formats.
@@ -95,6 +96,8 @@ const getProfile = async (customerId) => {
     loyalty_points: points,
     loyaltyPoints: points,
     addresses,
+    avatar_url: customer.avatarUrl || null,
+    preferences: preferencesService.withDefaults(customer.preferences),
     created_at: customer.createdAt,
     updated_at: customer.updatedAt,
   };
@@ -349,7 +352,40 @@ const deleteAddress = async (customerId, addressId) => {
   return { deleted: true, id: addressId };
 };
 
+const findCustomer = async (customerId) => {
+  if (!customerId) throw ApiError.unauthorized('Customer identity is required');
+  const customer = await Customer.findByPk(customerId);
+  if (!customer) throw ApiError.notFound('Customer not found');
+  return customer;
+};
+
+/** #189: sets the profile picture to an uploaded image and returns its link. */
+const setAvatar = async (customerId, url) => {
+  const customer = await findCustomer(customerId);
+  await customer.update({ avatarUrl: url });
+  return { avatar_url: url };
+};
+
+/** #189: removes the profile picture; the shop falls back to the customer's initials. */
+const removeAvatar = async (customerId) => {
+  const customer = await findCustomer(customerId);
+  await customer.update({ avatarUrl: null });
+  return { avatar_url: null };
+};
+
+/** #189 (FR-010): all preferences, saved values over the defaults. */
+const getPreferences = async (customerId) =>
+  preferencesService.withDefaults((await findCustomer(customerId)).preferences);
+
+/** #189 (FR-010): saves part of the preferences and returns all of them. */
+const updatePreferences = async (customerId, changes) =>
+  preferencesService.updatePreferences(await findCustomer(customerId), changes);
+
 module.exports = {
+  setAvatar,
+  removeAvatar,
+  getPreferences,
+  updatePreferences,
   getProfile,
   updateProfile,
   getAddresses,
