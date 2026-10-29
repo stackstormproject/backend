@@ -26,6 +26,7 @@ const ChatMessageModel = require('./ChatMessage');
 const InventoryLogModel = require('./InventoryLog');
 const BrandModel = require('./Brand');
 const PaymentMethodModel = require('./PaymentMethod');
+const BannerModel = require('./Banner');
 
 const sequelize = config.url
   ? new Sequelize(config.url, config)
@@ -57,6 +58,7 @@ const models = {
   InventoryLog: InventoryLogModel(sequelize),
   Brand: BrandModel(sequelize),
   PaymentMethod: PaymentMethodModel(sequelize),
+  Banner: BannerModel(sequelize),
 };
 
 Object.values(models).forEach((model) => {
