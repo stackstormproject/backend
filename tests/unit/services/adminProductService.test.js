@@ -331,6 +331,71 @@ describe('adminProductService.updateProduct', () => {
     expect(row.update).toHaveBeenCalledWith({ price: 4000, material: 'Cotton' });
     expect(cacheService.invalidateProductCache).toHaveBeenCalledWith(5, 'storm-hoodie');
   });
+
+  describe('Sprint 13: sale toggle', () => {
+    it('should set a discount percentage when on_sale is ticked', async () => {
+      const row = product();
+      Product.findByPk.mockResolvedValue(row);
+
+      await service.updateProduct(5, { on_sale: true, discount_percentage: '25' });
+
+      expect(row.update).toHaveBeenCalledWith({ discountPercentage: 25 });
+    });
+
+    it('should reject a percentage outside 1-90 when on sale', async () => {
+      Product.findByPk.mockResolvedValue(product());
+
+      await expect(
+        service.updateProduct(5, { on_sale: true, discount_percentage: 0 })
+      ).rejects.toMatchObject({ message: expect.stringMatching(/between 1 and 90/) });
+
+      await expect(
+        service.updateProduct(5, { on_sale: true, discount_percentage: 95 })
+      ).rejects.toMatchObject({ statusCode: 400 });
+    });
+
+    it('should clear the discount when on_sale is unticked', async () => {
+      const row = product({ discountPercentage: '20.00' });
+      Product.findByPk.mockResolvedValue(row);
+
+      await service.updateProduct(5, { on_sale: false });
+
+      expect(row.update).toHaveBeenCalledWith({ discountPercentage: null });
+    });
+
+    it('should infer on_sale from a bare discount_percentage', async () => {
+      const row = product();
+      Product.findByPk.mockResolvedValue(row);
+
+      await service.updateProduct(5, { discount_percentage: '30' });
+
+      expect(row.update).toHaveBeenCalledWith({ discountPercentage: 30 });
+    });
+
+    it('should reflect the sale on the admin product view', async () => {
+      Product.findAndCountAll.mockResolvedValue({
+        count: 1,
+        rows: [product({ price: '4000.00', discountPercentage: '25.00' })],
+      });
+
+      const result = await service.listProducts();
+
+      expect(result.products[0]).toMatchObject({
+        on_sale: true,
+        discount_percentage: 25,
+        sale_price: 3000,
+      });
+    });
+
+    it('should filter admin listings by section=sale', async () => {
+      Product.findAndCountAll.mockResolvedValue({ count: 0, rows: [] });
+
+      await service.listProducts({ section: 'sale' });
+
+      const queryArg = Product.findAndCountAll.mock.calls[0][0];
+      expect(queryArg.where.discountPercentage).toEqual({ [Op.gt]: 0 });
+    });
+  });
 });
 
 describe('adminProductService.addVariant', () => {

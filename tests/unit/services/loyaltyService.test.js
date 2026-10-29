@@ -26,6 +26,9 @@ const {
   getLoyaltyTransactions,
   redeemPoints,
   calculatePoints,
+  priceRedemption,
+  settleOrderLoyalty,
+  EARN_THRESHOLD_LKR,
 } = require('../../../src/services/loyalty.service');
 
 describe('loyaltyService', () => {
@@ -135,6 +138,128 @@ describe('loyaltyService', () => {
       expect(mockUpdate).toHaveBeenCalledWith({ currentPoints: 50 }, expect.anything());
       // The balance row is locked, so concurrent redemptions cannot double-spend.
       expect(Loyalty.findOne).toHaveBeenCalledWith(expect.objectContaining({ lock: 'UPDATE' }));
+    });
+  });
+
+  describe('priceRedemption', () => {
+    it('should return 0 for zero, negative or missing points', async () => {
+      expect(await priceRedemption(4, 0)).toBe(0);
+      expect(await priceRedemption(4, -5)).toBe(0);
+      expect(await priceRedemption(4, undefined)).toBe(0);
+    });
+
+    it('should reject a redemption the customer cannot afford', async () => {
+      Loyalty.findOne.mockResolvedValue({ customerId: 4, currentPoints: 50 });
+
+      await expect(priceRedemption(4, 100)).rejects.toThrow(ApiError);
+    });
+
+    it('should reject when the customer has no loyalty account at all', async () => {
+      Loyalty.findOne.mockResolvedValue(null);
+
+      await expect(priceRedemption(4, 100)).rejects.toThrow(ApiError);
+    });
+
+    it('should price points at 1 LKR each without touching the balance', async () => {
+      Loyalty.findOne.mockResolvedValue({ customerId: 4, currentPoints: 200 });
+
+      const discount = await priceRedemption(4, 150);
+
+      expect(discount).toBe(150);
+      expect(Loyalty.findOne).toHaveBeenCalledWith({ where: { customerId: 4 } });
+    });
+  });
+
+  describe('settleOrderLoyalty', () => {
+    const order = (overrides = {}) => ({
+      id: 42,
+      customerId: 4,
+      loyaltyPointsRedeemed: 0,
+      ...overrides,
+    });
+
+    it('should do nothing for a guest order with no customer', async () => {
+      const result = await settleOrderLoyalty(order({ customerId: null }), 20000);
+
+      expect(result).toEqual({ earned: 0, redeemed: 0 });
+      expect(Loyalty.findOne).not.toHaveBeenCalled();
+    });
+
+    it('should do nothing when there is nothing to earn or redeem', async () => {
+      const result = await settleOrderLoyalty(order(), EARN_THRESHOLD_LKR - 1);
+
+      expect(result).toEqual({ earned: 0, redeemed: 0 });
+    });
+
+    it('should award points once the goods subtotal reaches the earn threshold', async () => {
+      Loyalty.findOne
+        .mockResolvedValueOnce({
+          customerId: 4,
+          tier: 'silver',
+          currentPoints: 0,
+          lifetimePoints: 0,
+        })
+        .mockResolvedValueOnce({
+          customerId: 4,
+          currentPoints: 0,
+          lifetimePoints: 0,
+          update: jest.fn(),
+        });
+      LoyaltyTransaction.create.mockResolvedValue({});
+      Customer.update.mockResolvedValue({});
+
+      const result = await settleOrderLoyalty(order(), EARN_THRESHOLD_LKR);
+
+      expect(result).toEqual({ earned: 100, redeemed: 0 });
+      expect(LoyaltyTransaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({ points: 100, transactionType: 'earned' }),
+        expect.anything()
+      );
+    });
+
+    it('should spend redeemed points and record the redemption', async () => {
+      const update = jest.fn();
+      Loyalty.findOne.mockResolvedValue({
+        customerId: 4,
+        currentPoints: 300,
+        lifetimePoints: 300,
+        update,
+      });
+      LoyaltyTransaction.create.mockResolvedValue({});
+      Customer.update.mockResolvedValue({});
+
+      const result = await settleOrderLoyalty(order({ loyaltyPointsRedeemed: 150 }), 5000);
+
+      expect(result).toEqual({ earned: 0, redeemed: 150 });
+      expect(update).toHaveBeenCalledWith(
+        { currentPoints: 150, lifetimePoints: 300 },
+        expect.anything()
+      );
+      expect(LoyaltyTransaction.create).toHaveBeenCalledWith(
+        expect.objectContaining({ points: -150, transactionType: 'redeemed' }),
+        expect.anything()
+      );
+    });
+
+    it('should skip the redemption gracefully when the balance moved since checkout', async () => {
+      const update = jest.fn();
+      Loyalty.findOne.mockResolvedValue({ customerId: 4, currentPoints: 10, update });
+
+      // The reported figures reflect what checkout priced, not whether the balance actually
+      // moved - the important thing is the account itself is left untouched.
+      const result = await settleOrderLoyalty(order({ loyaltyPointsRedeemed: 150 }), 5000);
+
+      expect(result).toEqual({ earned: 0, redeemed: 150 });
+      expect(update).not.toHaveBeenCalled();
+    });
+
+    it('should leave the account untouched when it no longer exists', async () => {
+      Loyalty.findOne.mockResolvedValue(null);
+
+      const result = await settleOrderLoyalty(order({ loyaltyPointsRedeemed: 50 }), 5000);
+
+      expect(result).toEqual({ earned: 0, redeemed: 50 });
+      expect(LoyaltyTransaction.create).not.toHaveBeenCalled();
     });
   });
 });
