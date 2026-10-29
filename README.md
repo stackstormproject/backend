@@ -46,6 +46,20 @@ Checkout sends the shopper to Stripe Checkout and Stripe sends them back to
 verify the payment. Set `STRIPE_SECRET_KEY` (test keys work) and `FRONTEND_URL`. Without a
 Stripe key, outside production, the storefront's labelled test gateway is used instead.
 
+## Password reset
+
+`POST /api/v1/auth/forgot-password` with `{ email }` always answers 202 with the same message,
+so it never shows whether an email has an account. For a customer it stores a hash of a
+one-time token that expires after 60 minutes and emails a link to
+`FRONTEND_URL/reset-password?token=...`. `POST /api/v1/auth/reset-password` with
+`{ token, password }` sets the new password, ends every signed-in session and lifts a sign-in
+lock. Both are limited to 5 requests an hour per address.
+
+Email goes out through any SMTP server (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
+`MAIL_FROM`); for Gmail use `smtp.gmail.com`, port 465 and an app password. Without
+`SMTP_HOST` nothing is sent: the email is written to the backend log and, outside production,
+the response includes `dev_reset_url` so the storefront can show the link.
+
 ## Shop sections and brands
 
 `GET /products?section=new_arrivals|popular` lists the products staff marked for the home page
