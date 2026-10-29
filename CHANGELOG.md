@@ -38,7 +38,30 @@ All notable changes to this project are documented in this file.
   Stripe customer) or on the test gateway (`save_card: true`); `GET /users/me/payment-methods`,
   `PATCH .../:id/default` and `DELETE .../:id` (also detached at Stripe). Only brand, last four
   digits and expiry are stored. Migration adds `payment_methods` and
-  `customers.stripe_customer_id` (#190)
+  `customers.stripe_customer_id` (#190) feature/198-checkout-promo-loyalty-integration
+ feature/198-checkout-promo-loyalty-integration
+ feature/198-checkout-promo-loyalty-integration
+- Checkout accepts a promo code and/or loyalty-point redemption: `POST /checkout/promo/validate`
+  prices a code against the cart before payment, and `POST /checkout` applies both to the order
+  total (capped at the subtotal). Points are only spent and a code's usage is only counted once
+  the order is actually paid, from the same step that marks it paid, so an abandoned checkout
+  never burns either (#198)
+
+ feature/196-loyalty-earn-redeem
+- Loyalty points are earned automatically on any order whose goods subtotal reaches LKR 10,000,
+  and can be redeemed at checkout as an LKR-for-LKR discount; an order records how many points
+  it earned and redeemed. Migration adds `orders.loyalty_points_earned` and
+  `orders.loyalty_points_redeemed` (#196)
+ develop
+
+ feature/195-hero-banners
+- Hero banners: the three home page banners are managed from admin (`GET`/`PUT /admin/banners`,
+  `DELETE /admin/banners/:slot`) with a title, image, and an optional button that links
+  anywhere in the shop; `GET /banners` lists the active ones for the storefront. Migration
+  creates `banners` (#195)
+
+
+develop
 - Sale pricing: admin can put a product on sale with a discount percentage (1-90); the sale
   price is shown everywhere the product appears, products can be listed by `section=sale`, and
   the home page gets a "Sale" section alongside new arrivals and popular. Migration adds

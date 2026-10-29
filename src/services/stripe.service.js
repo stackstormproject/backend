@@ -9,6 +9,8 @@ const { QueryTypes } = require('sequelize');
 const { Customer, Order, sequelize } = require('../models');
 const reservationService = require('./reservation.service');
 const paymentMethodService = require('./paymentMethod.service');
+const loyaltyService = require('./loyalty.service');
+const promoCodeService = require('./promoCode.service');
 const { canReadOrder } = require('./order.service');
 const { storefrontUrl } = require('../utils/storefrontUrl');
 const logger = require('../config/logger');
@@ -140,6 +142,20 @@ const markOrderPaid = async (order, paymentIntentId) => {
 
   await order.update({ status: PAID_STATUS, paymentIntentId });
   logger.info(`[PAYMENT] Order ${order.id} paid (${paymentIntentId})`);
+
+  // Sprint 13: spend any redeemed points, award points earned, and count the promo
+  // redemption, now that the order is actually paid rather than merely initiated.
+  const goodsSubtotal =
+    Number(order.totalAmount) - Number(order.shippingCost) + Number(order.discountAmount);
+  await Promise.all([
+    loyaltyService.settleOrderLoyalty(order, goodsSubtotal).catch((err) => {
+      logger.error(`[PAYMENT] Loyalty settlement failed for order ${order.id}: ${err.message}`);
+    }),
+    promoCodeService.recordUsage(order.promoCodeId).catch((err) => {
+      logger.error(`[PAYMENT] Promo usage recording failed for order ${order.id}: ${err.message}`);
+    }),
+  ]);
+
   return { orderId: order.id, status: PAID_STATUS };
 };
 
