@@ -14,6 +14,23 @@ const cacheService = require('./cache.service');
  * @param {string} text - Raw string
  * @returns {string} URL slug
  */
+/**
+ * Computes the sale price from a product's list price and discount percentage (Sprint 13).
+ * A null, zero or negative percentage means the product is not on sale.
+ *
+ * @param {number} price - List price
+ * @param {number|null} discountPercentage
+ * @returns {{isOnSale: boolean, salePrice: number|null}}
+ */
+function applySale(price, discountPercentage) {
+  const pct = Number(discountPercentage);
+  if (!pct || pct <= 0) return { isOnSale: false, salePrice: null };
+  const clamped = Math.min(pct, 90);
+  const base = Number(price) || 0;
+  const salePrice = Number((base * (1 - clamped / 100)).toFixed(2));
+  return { isOnSale: true, salePrice };
+}
+
 function slugify(text) {
   if (!text) return '';
   return text
@@ -160,6 +177,7 @@ const fetchProductDetailFromDb = async (slug) => {
   const ratingSum = reviews.reduce((sum, r) => sum + (Number(r.rating) || 0), 0);
   const averageRating = reviewCount > 0 ? Number((ratingSum / reviewCount).toFixed(1)) : 0;
 
+  const sale = applySale(plain.price, plain.discountPercentage);
   return {
     id: plain.id,
     name: plain.name,
@@ -172,6 +190,9 @@ const fetchProductDetailFromDb = async (slug) => {
     category: plain.categoryDetails || plain.category,
     brand: plain.brand,
     is_final_sale: plain.isFinalSale ?? plain.is_final_sale ?? false,
+    is_on_sale: sale.isOnSale,
+    discount_percentage: sale.isOnSale ? Number(plain.discountPercentage) : null,
+    sale_price: sale.salePrice,
     primary_image: plain.primaryImage ?? plain.primary_image,
     gallery_images: plain.galleryImages || [],
     variants,
@@ -217,9 +238,10 @@ const listProducts = async ({
 }) => {
   const andConditions = [{ isActive: true }]; // archived products are hidden from the shop
 
-  // Home page sections chosen by staff (#173)
+  // Home page sections chosen by staff (#173); 'sale' lists discounted products (Sprint 13)
   if (section === 'new_arrivals') andConditions.push({ isNewArrival: true });
   if (section === 'popular') andConditions.push({ isPopular: true });
+  if (section === 'sale') andConditions.push({ discountPercentage: { [Op.gt]: 0 } });
   if (brand) andConditions.push({ brand });
   const variantWhere = {};
 
@@ -436,6 +458,7 @@ const listProducts = async ({
 
   const products = rows.map((p) => {
     const plain = typeof p.toJSON === 'function' ? p.toJSON() : p;
+    const sale = applySale(plain.price, plain.discountPercentage);
     return {
       id: plain.id,
       name: plain.name,
@@ -448,6 +471,9 @@ const listProducts = async ({
       brand: plain.brand || null,
       is_new_arrival: Boolean(plain.isNewArrival),
       is_popular: Boolean(plain.isPopular),
+      is_on_sale: sale.isOnSale,
+      discount_percentage: sale.isOnSale ? Number(plain.discountPercentage) : null,
+      sale_price: sale.salePrice,
       variants: (plain.variants || []).map(formatVariant),
     };
   });
@@ -475,6 +501,7 @@ module.exports = {
   slugify,
   calculateAvailableStock,
   formatVariant,
+  applySale,
   fetchProductDetailFromDb,
   getProductBySlug,
   invalidateProductCache: cacheService.invalidateProductCache,
