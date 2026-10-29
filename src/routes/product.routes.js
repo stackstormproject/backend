@@ -8,6 +8,9 @@ const router = Router();
 
 // Public catalog listing and faceted search
 router.get('/', productController.getProducts);
+// Search-as-you-type and filter options (#188); before '/:slug' so they are not read as slugs
+router.get('/suggest', productController.getSuggestions);
+router.get('/facets', productController.getFacets);
 
 // Reviews for a product
 router.get('/:id/reviews', reviewController.getProductReviews);

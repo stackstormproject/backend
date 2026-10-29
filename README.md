@@ -46,6 +46,14 @@ Checkout sends the shopper to Stripe Checkout and Stripe sends them back to
 verify the payment. Set `STRIPE_SECRET_KEY` (test keys work) and `FRONTEND_URL`. Without a
 Stripe key, outside production, the storefront's labelled test gateway is used instead.
 
+## Search and filters
+
+`GET /api/v1/products/suggest?q=bat` returns up to 6 products (names starting with the text
+first), 3 categories and 3 brands for the search box; fewer than 2 characters returns empty
+lists. `GET /api/v1/products/facets` lists the colours and sizes that are in stock, for the
+shop's filters. `GET /api/v1/products` filters by `category`, `size`, `color`, `brand`,
+`min_price`/`max_price` and `search` (name, description, brand, category).
+
 ## Password reset
 
 `POST /api/v1/auth/forgot-password` with `{ email }` always answers 202 with the same message,
