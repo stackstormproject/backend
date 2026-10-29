@@ -26,11 +26,17 @@ All notable changes to this project are documented in this file.
 - Password reset: `POST /auth/forgot-password` emails a one-hour, single-use link (SMTP, or
   the log and `dev_reset_url` in development) and `POST /auth/reset-password` sets the new
   password and signs out every session (#185)
+ feature/190-saved-payment-methods
 - Saved cards: signed-in shoppers can tick "save" on Stripe Checkout (each customer gets a
   Stripe customer) or on the test gateway (`save_card: true`); `GET /users/me/payment-methods`,
   `PATCH .../:id/default` and `DELETE .../:id` (also detached at Stripe). Only brand, last four
   digits and expiry are stored. Migration adds `payment_methods` and
   `customers.stripe_customer_id` (#190)
+
+- Search suggestions `GET /products/suggest?q=` (products, categories and brands as you type)
+  and filter options `GET /products/facets` (in-stock colours and sizes); full search also
+  matches the brand and treats `%` and `_` literally (#188)
+develop
 
 ### Changed
 
