@@ -9,7 +9,7 @@ const { Op, QueryTypes, UniqueConstraintError } = require('sequelize');
 const { Product, ProductVariant, Category, sequelize } = require('../models');
 const ApiError = require('../utils/ApiError');
 const cacheService = require('./cache.service');
-const { slugify, formatVariant } = require('./product.service');
+const { slugify, formatVariant, applySale } = require('./product.service');
 
 const NAME_MAX = 120;
 const TEXT_MAX = 2000;
@@ -80,6 +80,19 @@ const productFields = async (body, { partial = false } = {}) => {
   if (body.is_active !== undefined) fields.isActive = Boolean(body.is_active);
   if (body.is_new_arrival !== undefined) fields.isNewArrival = Boolean(body.is_new_arrival);
   if (body.is_popular !== undefined) fields.isPopular = Boolean(body.is_popular);
+  // Sprint 13: "on sale" toggle with a percentage; unticking or clearing it stops the sale.
+  if (body.on_sale !== undefined || body.discount_percentage !== undefined) {
+    const onSale = body.on_sale !== undefined ? Boolean(body.on_sale) : true;
+    if (!onSale) {
+      fields.discountPercentage = null;
+    } else {
+      const pct = Number(body.discount_percentage);
+      if (!Number.isFinite(pct) || pct <= 0 || pct > 90) {
+        throw ApiError.badRequest('Discount percentage must be a number between 1 and 90');
+      }
+      fields.discountPercentage = Number(pct.toFixed(2));
+    }
+  }
   if (body.primary_image !== undefined) fields.primaryImage = imageRef(body.primary_image, 'Image');
   if (body.gallery_images !== undefined) fields.galleryImages = galleryImages(body.gallery_images);
   if (body.category_id !== undefined) {
@@ -158,6 +171,7 @@ const usageByVariant = async (variantIds, transaction) => {
 
 const toAdminProduct = (product, usage = new Map()) => {
   const plain = product.get ? product.get({ plain: true }) : product;
+  const sale = applySale(plain.price, plain.discountPercentage);
   const variants = (plain.variants || [])
     .map(formatVariant)
     .sort((a, b) => a.id - b.id)
@@ -187,6 +201,9 @@ const toAdminProduct = (product, usage = new Map()) => {
     is_active: plain.isActive,
     is_new_arrival: Boolean(plain.isNewArrival),
     is_popular: Boolean(plain.isPopular),
+    on_sale: sale.isOnSale,
+    discount_percentage: sale.isOnSale ? Number(plain.discountPercentage) : null,
+    sale_price: sale.salePrice,
     primary_image: plain.primaryImage,
     gallery_images: plain.galleryImages || [],
     variants,
@@ -226,6 +243,7 @@ const listProducts = async (query = {}) => {
   if (query.category_id) where.categoryId = Number(query.category_id);
   if (query.section === 'new_arrivals') where.isNewArrival = true;
   if (query.section === 'popular') where.isPopular = true;
+  if (query.section === 'sale') where.discountPercentage = { [Op.gt]: 0 };
 
   const { count, rows } = await Product.findAndCountAll({
     where,
