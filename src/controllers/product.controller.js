@@ -6,6 +6,7 @@
 
 const productService = require('../services/product.service');
 const brandService = require('../services/brand.service');
+const productSearch = require('../services/productSearch.service');
 const { successResponse, errorResponse } = require('../utils/responseFormatter');
 
 /**
@@ -60,7 +61,31 @@ const getProducts = async (req, res, next) => {
   }
 };
 
+/** GET /products/suggest?q=bat -> matching products, categories and brands (#188). */
+const getSuggestions = async (req, res, next) => {
+  try {
+    const result = await productSearch.suggest(req.query.q ?? req.query.search);
+    res.set('Cache-Control', 'public, max-age=30');
+    return successResponse(res, result, 'Suggestions retrieved', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** GET /products/facets -> in-stock colours and sizes for the filters (#188). */
+const getFacets = async (req, res, next) => {
+  try {
+    const result = await productSearch.facets();
+    res.set('Cache-Control', 'public, max-age=60');
+    return successResponse(res, result, 'Filter options retrieved', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
 module.exports = {
   getProductBySlug,
   getProducts,
+  getSuggestions,
+  getFacets,
 };
