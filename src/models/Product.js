@@ -67,6 +67,13 @@ module.exports = (sequelize) => {
         defaultValue: [],
         field: 'gallery_images',
       },
+      // Sprint 13: a percentage off `price`, set from the product form (#194, FR sale).
+      // Null or 0 means the product is not on sale.
+      discountPercentage: {
+        type: DataTypes.DECIMAL(5, 2),
+        allowNull: true,
+        field: 'discount_percentage',
+      },
     },
     {
       sequelize,
