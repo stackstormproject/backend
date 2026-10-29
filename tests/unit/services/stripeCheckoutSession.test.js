@@ -1,20 +1,36 @@
 const mockSessionCreate = jest.fn();
 const mockSessionRetrieve = jest.fn();
+const mockCustomerCreate = jest.fn();
+const mockDetach = jest.fn();
 
 jest.mock('stripe', () =>
   jest.fn().mockImplementation(() => ({
     checkout: { sessions: { create: mockSessionCreate, retrieve: mockSessionRetrieve } },
+    customers: { create: mockCustomerCreate },
+    paymentMethods: { detach: mockDetach },
   }))
 );
 jest.mock('../../../src/models', () => ({
   Order: { findByPk: jest.fn() },
+  Customer: { findByPk: jest.fn() },
   sequelize: { query: jest.fn() },
+}));
+jest.mock('../../../src/services/paymentMethod.service', () => ({
+  saveFromStripe: jest.fn(),
+  saveTestCard: jest.fn(),
+}));
+jest.mock('../../../src/config/logger', () => ({
+  info: jest.fn(),
+  warn: jest.fn(),
+  error: jest.fn(),
 }));
 jest.mock('../../../src/services/reservation.service', () => ({
   confirmReservation: jest.fn().mockResolvedValue(true),
 }));
 
-const { Order, sequelize } = require('../../../src/models');
+const { Order, Customer, sequelize } = require('../../../src/models');
+const paymentMethodService = require('../../../src/services/paymentMethod.service');
+const logger = require('../../../src/config/logger');
 const stripeService = require('../../../src/services/stripe.service');
 
 // Refs #180: hosted payment page (Stripe Checkout) and its server-side verification.
@@ -163,6 +179,109 @@ describe('stripeService hosted payment page', () => {
     expect(result.url).toMatch(
       /^http:\/\/localhost:5173\/checkout\/test-gateway\?order=10&session_id=mock_cs_10_\d+$/
     );
+  });
+
+  describe('saved cards (#190)', () => {
+    const paidSession = (paymentMethod) => ({
+      payment_status: 'paid',
+      amount_total: 885000,
+      metadata: { order_id: '10' },
+      payment_intent: { id: 'pi_5', payment_method: paymentMethod },
+    });
+
+    it('should create the Stripe customer once and let Checkout offer to save the card', async () => {
+      const customer = { id: 4, email: 'a@x.lk', name: 'A', stripeCustomerId: null };
+      customer.update = jest.fn(async (patch) => Object.assign(customer, patch));
+      Customer.findByPk.mockResolvedValue(customer);
+      mockCustomerCreate.mockResolvedValue({ id: 'cus_1' });
+      mockSessionCreate.mockResolvedValue({ id: 'cs_1', url: 'https://checkout.stripe.com/1' });
+      Order.findByPk.mockResolvedValue(makeOrder());
+
+      await stripeService.createCheckoutSession(10, owner);
+      Order.findByPk.mockResolvedValue(makeOrder());
+      await stripeService.createCheckoutSession(10, owner);
+
+      expect(mockCustomerCreate).toHaveBeenCalledTimes(1);
+      expect(mockCustomerCreate).toHaveBeenCalledWith({
+        email: 'a@x.lk',
+        name: 'A',
+        metadata: { customer_id: '4' },
+      });
+      const args = mockSessionCreate.mock.calls[1][0];
+      expect(args).toMatchObject({
+        customer: 'cus_1',
+        saved_payment_method_options: { payment_method_save: 'enabled' },
+      });
+      expect(args.customer_email).toBeUndefined();
+    });
+
+    it('should fall back to the email when the customer record is gone', async () => {
+      Customer.findByPk.mockResolvedValue(null);
+      mockSessionCreate.mockResolvedValue({ id: 'cs_1', url: 'u' });
+      Order.findByPk.mockResolvedValue(makeOrder({ guestEmail: null }));
+
+      await stripeService.createCheckoutSession(10, owner);
+
+      expect(mockSessionCreate.mock.calls[0][0].customer).toBeUndefined();
+    });
+
+    it('should save the card only when the shopper ticked save on Stripe', async () => {
+      const kept = { id: 'pm_1', customer: 'cus_1', allow_redisplay: 'always', card: {} };
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'cs_1' }));
+      mockSessionRetrieve.mockResolvedValue(paidSession(kept));
+      await stripeService.confirmCheckoutSession(10, owner, 'cs_1');
+      expect(mockSessionRetrieve).toHaveBeenCalledWith('cs_1', {
+        expand: ['payment_intent.payment_method'],
+      });
+      expect(paymentMethodService.saveFromStripe).toHaveBeenCalledWith(4, kept);
+
+      paymentMethodService.saveFromStripe.mockClear();
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'cs_1' }));
+      mockSessionRetrieve.mockResolvedValue(
+        paidSession({ id: 'pm_2', customer: 'cus_1', allow_redisplay: 'limited' })
+      );
+      await stripeService.confirmCheckoutSession(10, owner, 'cs_1');
+      expect(paymentMethodService.saveFromStripe).not.toHaveBeenCalled();
+    });
+
+    it('should keep the payment when saving the card fails', async () => {
+      paymentMethodService.saveFromStripe.mockRejectedValue(new Error('db down'));
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'cs_1' }));
+      mockSessionRetrieve.mockResolvedValue(
+        paidSession({ id: 'pm_1', customer: 'cus_1', allow_redisplay: 'always' })
+      );
+
+      await expect(stripeService.confirmCheckoutSession(10, owner, 'cs_1')).resolves.toEqual({
+        orderId: 10,
+        status: 'processing',
+      });
+      expect(logger.error).toHaveBeenCalledWith(
+        'Could not save the card after payment',
+        expect.anything()
+      );
+    });
+
+    it('should save the test card from the test gateway when asked', async () => {
+      delete process.env.STRIPE_SECRET_KEY;
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'mock_cs_10_1' }));
+      await stripeService.confirmCheckoutSession(10, owner, 'mock_cs_10_1', { saveCard: true });
+      expect(paymentMethodService.saveTestCard).toHaveBeenCalledWith(4);
+
+      paymentMethodService.saveTestCard.mockClear();
+      Order.findByPk.mockResolvedValue(makeOrder({ paymentIntentId: 'mock_cs_10_1' }));
+      await stripeService.confirmCheckoutSession(10, owner, 'mock_cs_10_1');
+      expect(paymentMethodService.saveTestCard).not.toHaveBeenCalled();
+    });
+
+    it('should detach a card at Stripe only when Stripe is in use', async () => {
+      await stripeService.detachPaymentMethod('pm_1');
+      expect(mockDetach).toHaveBeenCalledWith('pm_1');
+
+      mockDetach.mockClear();
+      delete process.env.STRIPE_SECRET_KEY;
+      await stripeService.detachPaymentMethod('pm_1');
+      expect(mockDetach).not.toHaveBeenCalled();
+    });
   });
 
   describe('webhook checkout.session.completed', () => {

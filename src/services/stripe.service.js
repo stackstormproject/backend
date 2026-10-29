@@ -6,8 +6,9 @@
 
 const Stripe = require('stripe');
 const { QueryTypes } = require('sequelize');
-const { Order, sequelize } = require('../models');
+const { Customer, Order, sequelize } = require('../models');
 const reservationService = require('./reservation.service');
+const paymentMethodService = require('./paymentMethod.service');
 const { canReadOrder } = require('./order.service');
 const { storefrontUrl } = require('../utils/storefrontUrl');
 const logger = require('../config/logger');
@@ -181,6 +182,33 @@ const SESSION_TTL_SECONDS = 30 * 60; // Stripe's minimum
 const MOCK_SESSION_PREFIX = 'mock_cs_';
 
 /**
+ * The Stripe customer for a signed-in shopper, created on first use (#190). Payments made with
+ * it let Stripe Checkout offer "save this card" and show cards saved earlier.
+ */
+const stripeCustomerFor = async (customerId) => {
+  if (!customerId) return null;
+  const customer = await Customer.findByPk(customerId);
+  if (!customer) return null;
+  if (customer.stripeCustomerId) return customer.stripeCustomerId;
+  const created = await getStripe().customers.create({
+    email: customer.email,
+    name: customer.name,
+    metadata: { customer_id: String(customer.id) },
+  });
+  await customer.update({ stripeCustomerId: created.id });
+  return created.id;
+};
+
+/** Saving a card must never undo a payment that went through. */
+const saveCardQuietly = async (work) => {
+  try {
+    await work();
+  } catch (error) {
+    logger.error('Could not save the card after payment', { error: error.message });
+  }
+};
+
+/**
  * Starts payment on the hosted page for a payment_pending order.
  * @returns {{ provider, sessionId, url, amount }} url is where the browser goes next
  */
@@ -203,11 +231,17 @@ const createCheckoutSession = async (orderId, caller = {}) => {
     };
   }
 
+  const stripeCustomer = await stripeCustomerFor(order.customerId);
   const session = await getStripe().checkout.sessions.create({
     mode: 'payment',
     payment_method_types: ['card'],
     client_reference_id: String(order.id),
-    customer_email: order.guestEmail || undefined,
+    ...(stripeCustomer
+      ? {
+          customer: stripeCustomer,
+          saved_payment_method_options: { payment_method_save: 'enabled' },
+        }
+      : { customer_email: order.guestEmail || undefined }),
     line_items: [
       {
         quantity: 1,
@@ -232,7 +266,12 @@ const createCheckoutSession = async (orderId, caller = {}) => {
  * The shopper is back from the payment page. The server checks the session with Stripe
  * (paid, amount, order) before marking the order paid; repeating the call is harmless.
  */
-const confirmCheckoutSession = async (orderId, caller = {}, sessionId = null) => {
+const confirmCheckoutSession = async (
+  orderId,
+  caller = {},
+  sessionId = null,
+  { saveCard = false } = {}
+) => {
   const order = await loadOwnedOrder(orderId, caller);
   if (order.status === PAID_STATUS) return { orderId: order.id, status: order.status };
   if (!sessionId || sessionId !== order.paymentIntentId) {
@@ -243,10 +282,16 @@ const confirmCheckoutSession = async (orderId, caller = {}, sessionId = null) =>
     if (getProvider() !== MOCK_PROVIDER) {
       throw ApiError.badRequest('Payment session does not belong to this order');
     }
-    return markOrderPaid(order, `mock_pi_${order.id}_${Date.now()}`);
+    const result = await markOrderPaid(order, `mock_pi_${order.id}_${Date.now()}`);
+    if (saveCard && order.customerId) {
+      await saveCardQuietly(() => paymentMethodService.saveTestCard(order.customerId));
+    }
+    return result;
   }
 
-  const session = await getStripe().checkout.sessions.retrieve(sessionId);
+  const session = await getStripe().checkout.sessions.retrieve(sessionId, {
+    expand: ['payment_intent.payment_method'],
+  });
   const paid = session.payment_status === 'paid';
   const amountMatches = session.amount_total === toMinorUnits(order.totalAmount);
   const orderMatches = String(session.metadata?.order_id) === String(order.id);
@@ -262,7 +307,19 @@ const confirmCheckoutSession = async (orderId, caller = {}, sessionId = null) =>
     typeof session.payment_intent === 'string'
       ? session.payment_intent
       : session.payment_intent?.id;
-  return markOrderPaid(order, intentId || sessionId);
+  const result = await markOrderPaid(order, intentId || sessionId);
+  // The shopper ticked "save" on Stripe's page: the card is attached to their Stripe customer.
+  const method = session.payment_intent?.payment_method;
+  if (order.customerId && method?.customer && method.allow_redisplay === 'always') {
+    await saveCardQuietly(() => paymentMethodService.saveFromStripe(order.customerId, method));
+  }
+  return result;
+};
+
+/** Removes a saved card at Stripe (#190). */
+const detachPaymentMethod = async (paymentMethodId) => {
+  if (getProvider() !== STRIPE_PROVIDER) return;
+  await getStripe().paymentMethods.detach(paymentMethodId);
 };
 
 /**
@@ -345,6 +402,7 @@ module.exports = {
   confirmOrderPayment,
   createCheckoutSession,
   confirmCheckoutSession,
+  detachPaymentMethod,
   markOrderPaid,
   refundOrderPayment,
   constructWebhookEvent,

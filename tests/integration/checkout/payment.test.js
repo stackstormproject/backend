@@ -89,7 +89,11 @@ describe('Payment flow (mock provider)', () => {
     const confirm = await request(app)
       .post('/api/v1/payments/confirm-session')
       .set('Authorization', bearer)
-      .send({ order_id: checkout.order_id, session_id: session.body.data.sessionId });
+      .send({
+        order_id: checkout.order_id,
+        session_id: session.body.data.sessionId,
+        save_card: true,
+      });
     const again = await request(app)
       .post('/api/v1/payments/confirm-session')
       .set('Authorization', bearer)
@@ -101,6 +105,11 @@ describe('Payment flow (mock provider)', () => {
     expect(order.status).toBe('processing');
     expect(order.paymentIntentId).toMatch(/^mock_pi_/);
     expect((await ProductVariant.findByPk(variant.id)).reservedQuantity).toBe(0);
+    // #190: "save this card" on the test gateway keeps the labelled test card
+    const cards = await request(app)
+      .get('/api/v1/users/me/payment-methods')
+      .set('Authorization', bearer);
+    expect(cards.body.data).toEqual([expect.objectContaining({ last4: '4242', is_test: true })]);
 
     const late = await request(app)
       .post('/api/v1/payments/checkout-session')

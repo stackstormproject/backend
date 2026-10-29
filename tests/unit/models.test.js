@@ -8,10 +8,11 @@ describe('models', () => {
     await models.sequelize.close();
   });
 
-  it('should register 24 models given the model index loads', () => {
+  it('should register 25 models given the model index loads', () => {
     const names = Object.keys(models).filter((key) => !['sequelize', 'Sequelize'].includes(key));
 
-    expect(names).toHaveLength(24);
+    expect(names).toHaveLength(25);
+    expect(names).toContain('PaymentMethod'); // #190
     expect(names).toContain('Category');
   });
 
