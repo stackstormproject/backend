@@ -61,7 +61,8 @@ const confirmCheckoutSession = async (req, res, next) => {
     const result = await stripeService.confirmCheckoutSession(
       orderId,
       callerOf(req),
-      req.body.session_id || req.body.sessionId || null
+      req.body.session_id || req.body.sessionId || null,
+      { saveCard: req.body.save_card === true }
     );
     return successResponse(res, result, 'Payment confirmed', 200);
   } catch (error) {

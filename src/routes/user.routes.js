@@ -13,6 +13,11 @@ router.put('/profile', userController.updateProfile);
 router.patch('/me', userController.updateProfile);
 router.patch('/profile', userController.updateProfile);
 
+// #190: cards saved on the payment page (only brand, last 4 digits and expiry are stored)
+router.get('/me/payment-methods', userController.listPaymentMethods);
+router.patch('/me/payment-methods/:id/default', userController.setDefaultPaymentMethod);
+router.delete('/me/payment-methods/:id', userController.deletePaymentMethod);
+
 router.get('/addresses', userController.getAddresses);
 router.post('/addresses', userController.addAddress);
 router.put('/addresses/:id', userController.updateAddress);
