@@ -1,14 +1,14 @@
 const request = require('supertest');
 const app = require('../../../src/app');
-const { Loyalty, sequelize } = require('../../../src/models');
+const { sequelize } = require('../../../src/models');
 const { createTestVariant } = require('../../helpers/factories');
 const { createAdmin, createCustomer } = require('../../helpers/db');
 const { generateAccessToken } = require('../../../src/utils/tokenGenerator');
 
-// Refs #138: searchable customer records and audited loyalty corrections (FR024, FR027).
+// Refs #138: searchable customer records (FR024).
 const ADDRESS = { line1: '12 Main Street', city: 'Dickwella', postal_code: '81200' };
 
-describe('Admin customers and loyalty', () => {
+describe('Admin customers', () => {
   const originalKey = process.env.STRIPE_SECRET_KEY;
   let admin;
   let bearer;
@@ -98,74 +98,6 @@ describe('Admin customers and loyalty', () => {
     expect(res.body.data.addresses).toEqual([]);
   });
 
-  it('should adjust points with a logged reason the customer can see', async () => {
-    const customer = await newCustomer();
-
-    const added = await asAdmin('post', `/admin/customers/${customer.id}/loyalty-adjustments`).send(
-      {
-        points: 500,
-        note: 'Goodwill for late delivery',
-      }
-    );
-    const removed = await asAdmin(
-      'post',
-      `/admin/customers/${customer.id}/loyalty-adjustments`
-    ).send({
-      points: -200,
-      note: 'Duplicate credit',
-    });
-    const history = await request(app)
-      .get('/api/v1/loyalty/transactions')
-      .set('Authorization', `Bearer ${generateAccessToken(customer.id, 'customer')}`);
-
-    expect(added.body.data.points).toBe(500);
-    expect(removed.body.data.points).toBe(300);
-    expect(removed.body.data.loyalty_transactions[0]).toMatchObject({
-      points: -200,
-      transaction_type: 'adjusted',
-      description: 'Duplicate credit',
-      admin_name: admin.name,
-    });
-    expect(history.body.data.transactions.map((t) => t.description || t.reason)).toEqual(
-      expect.arrayContaining(['Goodwill for late delivery'])
-    );
-    const account = await Loyalty.findOne({ where: { customerId: customer.id } });
-    expect(account).toMatchObject({ currentPoints: 300, lifetimePoints: 500 });
-  });
-
-  it('should never let concurrent removals take the balance below zero', async () => {
-    const customer = await newCustomer();
-    await asAdmin('post', `/admin/customers/${customer.id}/loyalty-adjustments`).send({
-      points: 100,
-      note: 'Opening',
-    });
-
-    const results = await Promise.all(
-      [1, 2, 3].map(() =>
-        asAdmin('post', `/admin/customers/${customer.id}/loyalty-adjustments`).send({
-          points: -60,
-          note: 'Remove',
-        })
-      )
-    );
-
-    expect(results.map((r) => r.status).sort()).toEqual([200, 409, 409]);
-    expect((await Loyalty.findOne({ where: { customerId: customer.id } })).currentPoints).toBe(40);
-  });
-
-  it.each([
-    [{ points: 0, note: 'x' }, 400],
-    [{ points: 2.5, note: 'x' }, 400],
-    [{ points: 10 }, 400],
-  ])('should reject %j', async (body, status) => {
-    const customer = await newCustomer();
-
-    expect(
-      (await asAdmin('post', `/admin/customers/${customer.id}/loyalty-adjustments`).send(body))
-        .status
-    ).toBe(status);
-  });
-
   it('should return 404 for an unknown customer and 403 for support agents', async () => {
     const agent = await createAdmin({
       email: `agent.crm.${Date.now()}@example.com`,
@@ -173,14 +105,6 @@ describe('Admin customers and loyalty', () => {
     });
 
     expect((await asAdmin('get', '/admin/customers/999999')).status).toBe(404);
-    expect(
-      (
-        await asAdmin('post', '/admin/customers/999999/loyalty-adjustments').send({
-          points: 1,
-          note: 'x',
-        })
-      ).status
-    ).toBe(404);
     const asAgent = await request(app)
       .get('/api/v1/admin/customers')
       .set('Authorization', `Bearer ${generateAccessToken(agent.id, 'support_agent')}`);

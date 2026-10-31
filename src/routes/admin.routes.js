@@ -60,7 +60,6 @@ router.post('/returns/:id/receive', managers, adminReturnController.receive);
 
 router.get('/customers', managers, adminCustomerController.list);
 router.get('/customers/:id', managers, adminCustomerController.detail);
-router.post('/customers/:id/loyalty-adjustments', managers, adminCustomerController.adjustPoints);
 
 router.get('/inventory', managers, adminInventoryController.list);
 router.post('/inventory/:variantId/adjust', managers, adminInventoryController.adjust);

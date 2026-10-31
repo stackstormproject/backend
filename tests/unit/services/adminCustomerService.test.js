@@ -1,19 +1,15 @@
 jest.mock('../../../src/models', () => ({
-  Loyalty: { findOne: jest.fn(), create: jest.fn() },
-  LoyaltyTransaction: { create: jest.fn() },
-  Customer: { findByPk: jest.fn() },
-  sequelize: { query: jest.fn(), transaction: jest.fn() },
+  sequelize: { query: jest.fn() },
 }));
 jest.mock('../../../src/services/order.service', () => ({
   generateInvoiceNumber: ({ id }) => `DFC-2026-${String(id).padStart(4, '0')}`,
 }));
 
-const { Loyalty, LoyaltyTransaction, Customer, sequelize } = require('../../../src/models');
+const { sequelize } = require('../../../src/models');
 const service = require('../../../src/services/adminCustomer.service');
 
-// Refs #138: customer search and audited loyalty corrections (unit level; spending figures
-// against real orders are in tests/integration/admin/customers.test.js).
-const transaction = { LOCK: { UPDATE: 'UPDATE' } };
+// Refs #138: customer search (unit level; spending figures against real orders are in
+// tests/integration/admin/customers.test.js).
 const summary = (overrides = {}) => ({
   id: 4,
   name: 'Alice',
@@ -30,7 +26,6 @@ const summary = (overrides = {}) => ({
 
 beforeEach(() => {
   jest.resetAllMocks();
-  sequelize.transaction.mockImplementation((cb) => cb(transaction));
 });
 
 describe('adminCustomerService.listCustomers', () => {
@@ -102,100 +97,5 @@ describe('adminCustomerService.getCustomer', () => {
     ]);
     expect(result.addresses).toEqual([{ id: 1, city: 'Colombo' }]);
     expect(result.loyalty_transactions).toEqual([{ id: 5, points: 50 }]);
-  });
-});
-
-describe('adminCustomerService.adjustPoints', () => {
-  const customer = { id: 4, update: jest.fn() };
-  const account = (overrides = {}) => ({
-    currentPoints: 100,
-    lifetimePoints: 300,
-    update: jest.fn(),
-    ...overrides,
-  });
-  const stubDetail = () => sequelize.query.mockResolvedValueOnce([summary()]).mockResolvedValue([]);
-
-  it.each([0, 1.5, 'abc', 100001])('should reject a change of %p points', async (points) => {
-    await expect(service.adjustPoints(4, { points, note: 'x' }, 1)).rejects.toMatchObject({
-      statusCode: 400,
-    });
-  });
-
-  it('should require a reason', async () => {
-    await expect(service.adjustPoints(4, { points: 10, note: '  ' }, 1)).rejects.toMatchObject({
-      statusCode: 400,
-    });
-    expect(sequelize.transaction).not.toHaveBeenCalled();
-  });
-
-  it('should return 404 for a missing customer', async () => {
-    Customer.findByPk.mockResolvedValue(null);
-
-    await expect(service.adjustPoints(99, { points: 10, note: 'Gift' }, 1)).rejects.toMatchObject({
-      statusCode: 404,
-    });
-  });
-
-  it('should not let a balance go below zero', async () => {
-    Customer.findByPk.mockResolvedValue(customer);
-    Loyalty.findOne.mockResolvedValue(account());
-
-    await expect(service.adjustPoints(4, { points: -101, note: 'Fraud' }, 1)).rejects.toMatchObject(
-      { statusCode: 409, message: 'Only 100 points available to remove' }
-    );
-  });
-
-  it('should add points to lifetime and log the change with the admin', async () => {
-    const loyalty = account();
-    Customer.findByPk.mockResolvedValue(customer);
-    Loyalty.findOne.mockResolvedValue(loyalty);
-    stubDetail();
-
-    await service.adjustPoints(4, { points: '50', note: ' Late delivery ' }, 1);
-
-    expect(Loyalty.findOne).toHaveBeenCalledWith({
-      where: { customerId: 4 },
-      transaction,
-      lock: 'UPDATE',
-    });
-    expect(loyalty.update).toHaveBeenCalledWith(
-      { currentPoints: 150, lifetimePoints: 350 },
-      { transaction }
-    );
-    expect(LoyaltyTransaction.create).toHaveBeenCalledWith(
-      {
-        customerId: 4,
-        points: 50,
-        transactionType: 'adjusted',
-        description: 'Late delivery',
-        adminId: 1,
-      },
-      { transaction }
-    );
-    expect(customer.update).toHaveBeenCalledWith({ loyaltyPoints: 150 }, { transaction });
-  });
-
-  it('should keep lifetime points when removing points', async () => {
-    const loyalty = account();
-    Customer.findByPk.mockResolvedValue(customer);
-    Loyalty.findOne.mockResolvedValue(loyalty);
-    stubDetail();
-
-    await service.adjustPoints(4, { points: -40, note: 'Returned order' }, 1);
-
-    expect(loyalty.update.mock.calls[0][0]).toEqual({ currentPoints: 60, lifetimePoints: 300 });
-  });
-
-  it('should open a silver account for a customer without one', async () => {
-    const created = account({ currentPoints: 0, lifetimePoints: 0 });
-    Customer.findByPk.mockResolvedValue(customer);
-    Loyalty.findOne.mockResolvedValue(null);
-    Loyalty.create.mockResolvedValue(created);
-    stubDetail();
-
-    await service.adjustPoints(4, { points: 25, note: 'Welcome' }, 1);
-
-    expect(Loyalty.create.mock.calls[0][0]).toMatchObject({ customerId: 4, tier: 'silver' });
-    expect(created.update.mock.calls[0][0]).toEqual({ currentPoints: 25, lifetimePoints: 25 });
   });
 });
