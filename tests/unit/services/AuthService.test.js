@@ -111,6 +111,7 @@ describe('AuthService', () => {
         id: 23,
         name: 'Test Customer',
         email: 'customer@example.com',
+        avatar_url: null,
       },
       accessToken: 'access-token',
       refreshToken: 'raw-refresh-token',
