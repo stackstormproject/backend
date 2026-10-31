@@ -8,7 +8,6 @@ const crypto = require('crypto');
 const { Order, OrderItem, ProductVariant, Product, sequelize } = require('../models');
 const reservationService = require('./reservation.service');
 const promoCodeService = require('./promoCode.service');
-const loyaltyService = require('./loyalty.service');
 const ApiError = require('../utils/ApiError');
 const logger = require('../config/logger');
 
@@ -207,9 +206,8 @@ const initiateCheckout = async (checkoutData = {}) => {
     };
   });
 
-  // 5. Price any promo code and loyalty-point redemption (Sprint 13, FR-015)
+  // 5. Price any promo code (#11: loyalty-point redemption removed; see CHANGELOG)
   const rawPromoCode = (checkoutData.promoCode || checkoutData.promo_code || '').trim();
-  const rawRedeemPoints = checkoutData.redeemPoints ?? checkoutData.redeem_points;
 
   let promoCodeId = null;
   let appliedPromoCode = null;
@@ -221,16 +219,10 @@ const initiateCheckout = async (checkoutData = {}) => {
     promoDiscount = priced.discountAmount;
   }
 
-  let loyaltyPointsRedeemed = 0;
-  let loyaltyDiscount = 0;
-  const requestedPoints = parseInt(rawRedeemPoints, 10);
-  if (requestedPoints > 0) {
-    if (!customerId) {
-      throw ApiError.badRequest('Sign in to redeem loyalty points');
-    }
-    loyaltyDiscount = await loyaltyService.priceRedemption(customerId, requestedPoints);
-    loyaltyPointsRedeemed = requestedPoints;
-  }
+  // Loyalty-point redemption was removed (#11); kept at 0 so downstream totals/order
+  // columns stay valid without deleting the (still-present) order columns themselves.
+  const loyaltyPointsRedeemed = 0;
+  const loyaltyDiscount = 0;
 
   // 6. Calculate shipping & totals
   const shippingFee = calculateShippingFee(subtotal, shippingMethod);
