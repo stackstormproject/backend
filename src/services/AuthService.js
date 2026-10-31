@@ -25,6 +25,10 @@ function toPublicCustomer(customer) {
   delete safe.resetTokenExpiresAt;
   delete safe.failedLoginAttempts;
   delete safe.lockedUntil;
+  // #3: the avatar-upload and profile endpoints return `avatar_url` (snake_case); the
+  // storefront reads that same key off the session customer, so mirror it here too -
+  // otherwise a profile picture uploaded earlier silently disappears on the next sign-in.
+  safe.avatar_url = safe.avatarUrl || null;
   return safe;
 }
 async function issueSession(subject, subjectType, { transaction } = {}) {

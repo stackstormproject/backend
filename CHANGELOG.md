@@ -77,6 +77,9 @@ All notable changes to this project are documented in this file.
 
 - `npm run db:seed` stopped before creating categories and products on a new database, so
   the shop showed none; the catalogue and sample-order scripts now run as seeders (#171)
+- A profile picture uploaded earlier disappeared after signing out and back in: the login,
+  register and refresh-token session customer only carried the Sequelize-shaped `avatarUrl`,
+  not the `avatar_url` the storefront actually reads (#3)
 
 ### Security
 
