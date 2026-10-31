@@ -112,7 +112,7 @@ describe('AuthService.refreshSession', () => {
       { transaction }
     );
     expect(result).toMatchObject({ accessToken: 'new-access', refreshToken: 'new-refresh' });
-    expect(result.customer).toEqual({ id: 7, email: 'alice@example.com' });
+    expect(result.customer).toEqual({ id: 7, email: 'alice@example.com', avatar_url: null });
   });
 
   it('should issue an admin session with the admin profile only', async () => {
