@@ -5,7 +5,7 @@
 // ==============================================================================
 
 const { QueryTypes } = require('sequelize');
-const { Loyalty, LoyaltyTransaction, Customer, sequelize } = require('../models');
+const { sequelize } = require('../models');
 const ApiError = require('../utils/ApiError');
 const { generateInvoiceNumber } = require('./order.service');
 
@@ -19,8 +19,6 @@ const SORTS = {
 const TIERS = ['silver', 'gold', 'platinum'];
 const DEFAULT_PAGE_SIZE = 20;
 const MAX_PAGE_SIZE = 100;
-const MAX_ADJUSTMENT = 100000;
-const NOTE_MAX = 200;
 
 const SUMMARY = `
   SELECT c.id, c.name, c.email, c.phone, c.created_at,
@@ -125,58 +123,4 @@ const getCustomer = async (id) => {
   };
 };
 
-/** Adds or removes points with a reason; never below zero. */
-const adjustPoints = async (customerId, { points, note }, adminId) => {
-  const change = Number(points);
-  if (!Number.isInteger(change) || change === 0 || Math.abs(change) > MAX_ADJUSTMENT) {
-    throw ApiError.badRequest(
-      `Points must be a whole number between -${MAX_ADJUSTMENT} and ${MAX_ADJUSTMENT}, not 0`
-    );
-  }
-  const reason = String(note || '')
-    .trim()
-    .slice(0, NOTE_MAX);
-  if (!reason)
-    throw ApiError.badRequest('Give a reason; the customer sees it in their points history');
-
-  await sequelize.transaction(async (transaction) => {
-    const customer = await Customer.findByPk(customerId, { transaction });
-    if (!customer) throw ApiError.notFound(`Customer ${customerId} not found`);
-    let account = await Loyalty.findOne({
-      where: { customerId },
-      transaction,
-      lock: transaction.LOCK.UPDATE,
-    });
-    if (!account) {
-      account = await Loyalty.create(
-        {
-          customerId,
-          currentPoints: 0,
-          lifetimePoints: 0,
-          tier: 'silver',
-          tierStartDate: new Date(),
-        },
-        { transaction }
-      );
-    }
-    const balance = account.currentPoints + change;
-    if (balance < 0) {
-      throw ApiError.conflict(`Only ${account.currentPoints} points available to remove`);
-    }
-    await account.update(
-      {
-        currentPoints: balance,
-        lifetimePoints: change > 0 ? account.lifetimePoints + change : account.lifetimePoints,
-      },
-      { transaction }
-    );
-    await LoyaltyTransaction.create(
-      { customerId, points: change, transactionType: 'adjusted', description: reason, adminId },
-      { transaction }
-    );
-    await customer.update({ loyaltyPoints: balance }, { transaction });
-  });
-  return getCustomer(customerId);
-};
-
-module.exports = { listCustomers, getCustomer, adjustPoints };
+module.exports = { listCustomers, getCustomer };
