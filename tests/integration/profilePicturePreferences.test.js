@@ -38,6 +38,22 @@ describe('profile picture and preferences', () => {
     expect((await api('get', '/users/me')).body.data.avatar_url).toBeNull();
   });
 
+  // #3: the avatar survived a reload (GET /users/me) but vanished after signing out and back
+  // in, because the login/register/refresh session customer only carried the Sequelize-shaped
+  // `avatarUrl`, not the `avatar_url` the storefront actually reads.
+  it('should still show a saved profile picture after signing out and back in', async () => {
+    const uploaded = await api('post', '/users/me/avatar').attach('avatar', PNG, {
+      filename: 'me.png',
+      contentType: 'image/png',
+    });
+    expect(uploaded.status).toBe(200);
+
+    const login = await request(app)
+      .post('/api/v1/auth/login')
+      .send({ email: 'alice@example.com', password: 'SecurePass@123' });
+    expect(login.body.customer.avatar_url).toBe(uploaded.body.data.avatar_url);
+  });
+
   it('should refuse a missing file, a non-image and a guest', async () => {
     expect((await api('post', '/users/me/avatar')).status).toBe(400);
     const text = await api('post', '/users/me/avatar').attach('avatar', Buffer.from('hi'), {
