@@ -12,8 +12,4 @@ const handle = (fn, message) => async (req, res, next) => {
 module.exports = {
   list: handle((req) => service.listCustomers(req.query), 'Customers retrieved'),
   detail: handle((req) => service.getCustomer(Number(req.params.id)), 'Customer retrieved'),
-  adjustPoints: handle(
-    (req) => service.adjustPoints(Number(req.params.id), req.body || {}, req.user.id),
-    'Points adjusted'
-  ),
 };

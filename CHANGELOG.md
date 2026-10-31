@@ -60,6 +60,11 @@ All notable changes to this project are documented in this file.
   the order is actually paid, from the same step that marks it paid, so an abandoned checkout
   never burns either (#198)
 
+### Removed
+
+- Loyalty-point redemption at checkout and the admin "adjust points" tool; customer records
+  and live support still show a shopper's tier and points balance read-only (#11)
+
 ### Changed
 
 - Admin routes follow the role matrix: managers for catalogue, orders, stock, returns and
