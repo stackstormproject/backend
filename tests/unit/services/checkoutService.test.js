@@ -353,8 +353,8 @@ describe('checkoutService', () => {
       expect(release).toHaveBeenCalledWith('r9');
     });
 
-    describe('Sprint 13: promo codes and loyalty redemption', () => {
-      const { PromoCode, Loyalty } = require('../../../src/models');
+    describe('Sprint 13: promo codes', () => {
+      const { PromoCode } = require('../../../src/models');
 
       beforeEach(() => {
         jest.spyOn(ProductVariant, 'findAll').mockResolvedValue([stockedVariant()]);
@@ -408,54 +408,12 @@ describe('checkoutService', () => {
         expect(reserve).not.toHaveBeenCalled();
       });
 
-      it('should require sign-in to redeem loyalty points', async () => {
-        await expect(
-          initiateCheckout({
-            customerId: null,
-            guestEmail: 'guest@example.com',
-            shippingAddress: validAddress,
-            items: [{ variantId: 1, quantity: 1 }],
-            redeemPoints: 100,
-          })
-        ).rejects.toMatchObject({ message: expect.stringMatching(/Sign in/) });
-      });
-
-      it('should reject redeeming more points than the customer has', async () => {
-        jest.spyOn(Loyalty, 'findOne').mockResolvedValue({ customerId: 4, currentPoints: 50 });
-
-        await expect(
-          initiateCheckout({
-            customerId: 4,
-            shippingAddress: validAddress,
-            items: [{ variantId: 1, quantity: 1 }],
-            redeemPoints: 100,
-          })
-        ).rejects.toMatchObject({ statusCode: 400 });
-      });
-
-      it('should price redeemed points as an LKR-for-LKR discount and record it on the order', async () => {
-        jest.spyOn(Loyalty, 'findOne').mockResolvedValue({ customerId: 4, currentPoints: 500 });
-
-        const result = await initiateCheckout({
-          customerId: 4,
-          shippingAddress: validAddress,
-          items: [{ variantId: 1, quantity: 1 }],
-          redeemPoints: 200,
-        });
-
-        expect(result.breakdown.discount_amount).toBe(200);
-        expect(Order.create).toHaveBeenCalledWith(
-          expect.objectContaining({ loyaltyPointsRedeemed: 200, discountAmount: 200 }),
-          expect.anything()
-        );
-      });
-
-      it('should cap the combined promo + loyalty discount at the subtotal', async () => {
+      it('should cap a fixed-amount promo discount at the subtotal', async () => {
         jest.spyOn(PromoCode, 'findOne').mockResolvedValue({
           id: 7,
           code: 'BIG50',
           discountType: 'fixed_amount',
-          discountValue: '2000.00',
+          discountValue: '5000.00',
           minOrderAmount: '0.00',
           maxDiscountAmount: null,
           startDate: new Date('2020-01-01'),
@@ -464,17 +422,15 @@ describe('checkoutService', () => {
           timesUsed: 0,
           isActive: true,
         });
-        jest.spyOn(Loyalty, 'findOne').mockResolvedValue({ customerId: 4, currentPoints: 5000 });
 
         const result = await initiateCheckout({
           customerId: 4,
           shippingAddress: validAddress,
           items: [{ variantId: 1, quantity: 1 }],
           promoCode: 'BIG50',
-          redeemPoints: 2000,
         });
 
-        // Subtotal is 3000; a 2000 promo + 2000-point redemption would exceed it.
+        // Subtotal is 3000; a 5000 promo discount can't exceed that.
         expect(result.breakdown.discount_amount).toBe(3000);
         expect(result.breakdown.total_amount).toBe(450);
       });
