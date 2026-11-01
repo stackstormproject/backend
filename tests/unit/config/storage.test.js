@@ -48,4 +48,14 @@ describe('storage config', () => {
     expect(storage.mediaUrl('products/a.jpg')).toBe('/api/v1/media/products/a.jpg');
     expect(storage.UPLOAD_DIR).toBe(path.resolve('tmp-uploads'));
   });
+
+  it('should default the upload folder to the backend package root, not process.cwd()', () => {
+    delete process.env.UPLOAD_DIR;
+    const storage = load();
+
+    // Regardless of the directory `node`/`nodemon` was launched from, uploaded files should
+    // always resolve to the same place, so a restart from a different cwd never "loses" files
+    // that are still sitting right there on disk.
+    expect(storage.UPLOAD_DIR).toBe(path.resolve(__dirname, '../../../uploads'));
+  });
 });
