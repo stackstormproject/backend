@@ -5,7 +5,14 @@
 const path = require('path');
 
 const MEDIA_ROUTE = '/api/v1/media';
-const UPLOAD_DIR = path.resolve(process.env.UPLOAD_DIR || 'uploads');
+// Resolved against this file's own location, not process.cwd(): `npm run dev` from the
+// backend folder and a tool/IDE that launches node from somewhere else both land on the
+// same uploads/ folder, so files saved before a restart are never "lost" just because the
+// process started from a different working directory. An explicit UPLOAD_DIR still wins,
+// and is resolved the normal way (against cwd if relative).
+const UPLOAD_DIR = process.env.UPLOAD_DIR
+  ? path.resolve(process.env.UPLOAD_DIR)
+  : path.resolve(__dirname, '../../uploads');
 
 const useLocalStorage = () => {
   if (process.env.STORAGE_DRIVER) return process.env.STORAGE_DRIVER === 'local';
