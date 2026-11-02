@@ -1,7 +1,7 @@
 # backend
 
 [![CI Pipeline](https://github.com/stackstormproject/backend/actions/workflows/ci.yml/badge.svg?branch=develop)](https://github.com/stackstormproject/backend/actions)
-![Coverage](https://img.shields.io/badge/coverage-pending-lightgrey)
+![Coverage](https://img.shields.io/badge/coverage-96.7%25-brightgreen)
 
 StackStorm backend: Node.js / Express REST API, business logic and PostgreSQL data layer for the Dickwella Fashion Corner e-commerce system.
 
@@ -14,7 +14,7 @@ Node.js 20, Express 4, Sequelize 6, PostgreSQL 17, Redis 7, Jest and Supertest.
 ## Prerequisites
 
 | Software       | Version                            |
-| -------------- | ---------------------------------- |
+| -------------- | ----------------------------------- |
 | Node.js        | 20 LTS                             |
 | npm            | 10 or newer                        |
 | Docker Desktop | latest (runs PostgreSQL and Redis) |
@@ -36,25 +36,43 @@ The seed creates two staff accounts, both with the password in `SEED_ADMIN_PASSW
 `npx sequelize-cli db:migrate`, then `node src/seeders/seedCategoriesAndProducts.js`
 (categories, products and sizes; safe to repeat), then restart the API.
 
-Uploaded product images are saved in `uploads/` and served under `/api/v1/media` unless
+Uploaded product images are saved in `uploads/` and served under `/api/v1/media`, unless
 `STORAGE_DRIVER=s3` (or real AWS keys) is set.
+
+## Deployed application
+
+The API is not browsed directly; it is reached through the two deployed front ends, both of
+which proxy `/api/v1` to this service:
+
+| App | URL |
+| --- | --- |
+| Customer storefront | https://stackstorm.live/ |
+| Admin console | https://admin.stackstorm.live/ |
+
+Demo staff accounts for the deployed admin console (seeded, not real customer data):
+
+| Account | Role | Password |
+| --- | --- | --- |
+| `admin@stackstorm.lk` | super_admin | `NewPassword123` |
+| `support@stackstorm.lk` | support_agent | `NewPassword123` |
 
 ## Payments
 
-Checkout sends the shopper to Stripe Checkout and Stripe sends them back to
-`FRONTEND_URL/checkout/complete`, where the storefront asks `POST /payments/confirm-session` to
-verify the payment. Set `STRIPE_SECRET_KEY` (test keys work) and `FRONTEND_URL`. Without a
-Stripe key, outside production, the storefront's labelled test gateway is used instead.
+Checkout sends the shopper to Stripe Checkout, and Stripe sends them back to
+`FRONTEND_URL/checkout/complete`, where the storefront calls `POST /payments/confirm-session`
+to verify the payment. Set `STRIPE_SECRET_KEY` (test keys work) and `FRONTEND_URL`. Without a
+Stripe key, outside production, the storefront's clearly labelled test gateway is used
+instead and no money moves.
 
-feature/189-profile-picture-preferences
 ## Profile picture and preferences
 
 `POST /api/v1/users/me/avatar` takes one image in the multipart field `avatar` and stores it
-like product photos (backend disk or S3); `DELETE` removes it. `PATCH /api/v1/users/me/preferences`
-saves only the keys sent: `order_updates_email`, `sale_alerts`, `back_in_stock_alerts`,
-`newsletter` (off until the customer opts in), `push_notifications`, `preferred_payment`
-(`card` or `cod`) and `preferred_size`. Unknown keys or wrong types answer 400 with a
-`details` entry per field.
+like product photos (backend disk or S3); `DELETE` removes it. `PATCH
+/api/v1/users/me/preferences` saves only the keys sent: `order_updates_email`,
+`sale_alerts`, `back_in_stock_alerts`, `newsletter` (off until the customer opts in),
+`push_notifications`, `preferred_payment` (`card` or `cod`) and `preferred_size`. Unknown
+keys or wrong types answer `400` with a `details` entry per field.
+
 ## Search and filters
 
 `GET /api/v1/products/suggest?q=bat` returns up to 6 products (names starting with the text
@@ -62,36 +80,36 @@ first), 3 categories and 3 brands for the search box; fewer than 2 characters re
 lists. `GET /api/v1/products/facets` lists the colours and sizes that are in stock, for the
 shop's filters. `GET /api/v1/products` filters by `category`, `size`, `color`, `brand`,
 `min_price`/`max_price` and `search` (name, description, brand, category).
-develop
 
 ## Password reset
 
-`POST /api/v1/auth/forgot-password` with `{ email }` always answers 202 with the same message,
-so it never shows whether an email has an account. For a customer it stores a hash of a
-one-time token that expires after 60 minutes and emails a link to
-`FRONTEND_URL/reset-password?token=...`. `POST /api/v1/auth/reset-password` with
-`{ token, password }` sets the new password, ends every signed-in session and lifts a sign-in
-lock. Both are limited to 5 requests an hour per address.
+`POST /api/v1/auth/forgot-password` with `{ email }` always answers `202` with the same
+message, so it never reveals whether an email has an account. For a customer it stores a
+hash of a one-time token that expires after 60 minutes and emails a link to
+`FRONTEND_URL/reset-password?token=...`. `POST /api/v1/auth/reset-password` with `{ token,
+password }` sets the new password, ends every signed-in session and lifts a sign-in lock.
+Both are limited to 5 requests an hour per address.
 
 Email goes out through any SMTP server (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`,
 `MAIL_FROM`); for Gmail use `smtp.gmail.com`, port 465 and an app password. Without
-`SMTP_HOST` nothing is sent: the email is written to the backend log and, outside production,
-the response includes `dev_reset_url` so the storefront can show the link.
+`SMTP_HOST` nothing is sent: the email is written to the backend log and, outside
+production, the response includes `dev_reset_url` so the storefront can show the link.
 
-### Saved cards
+## Saved cards
 
-Signed-in shoppers pay as their own Stripe customer, so Stripe Checkout offers "save this card"
-and shows cards saved earlier. When a saved card was used, `confirm-session` records its brand,
-last four digits and expiry in `payment_methods`; the card number never reaches this server.
-On the test gateway, `save_card: true` saves a labelled test Visa ending 4242.
-`GET /api/v1/users/me/payment-methods` lists them (default first), `PATCH .../:id/default`
-changes the default and `DELETE .../:id` removes the card here and detaches it at Stripe.
+Signed-in shoppers pay as their own Stripe customer, so Stripe Checkout offers "save this
+card" and shows cards saved earlier. When a saved card is used, `confirm-session` records its
+brand, last four digits and expiry in `payment_methods`; the card number never reaches this
+server. On the test gateway, `save_card: true` saves a labelled test Visa ending `4242`. `GET
+/api/v1/users/me/payment-methods` lists them (default first), `PATCH .../:id/default` changes
+the default and `DELETE .../:id` removes the card here and detaches it at Stripe.
 
 ## Shop sections and brands
 
-`GET /products?section=new_arrivals|popular` lists the products staff marked for the home page
-(`is_new_arrival`, `is_popular` on the product), and `GET /products?brand=<slug or name>` one
-brand's products. `GET /brands` lists featured brands that have products on sale.
+`GET /products?section=new_arrivals|popular` lists the products staff marked for the home
+page (`is_new_arrival`, `is_popular` on the product), and `GET /products?brand=<slug or
+name>` lists one brand's products. `GET /brands` lists featured brands that have products on
+sale.
 
 ## Admin API
 
@@ -130,12 +148,13 @@ so do not configure it to point to a development or production database.
 
 ## CI/CD
 
-The pipeline is defined in the infra repo (`backend-ci.yml`) and called from `.github/workflows/ci.yml`.
-
-## Deployed application
-
-Staging URL: to be added when hosting is configured.
+The pipeline is defined in the infra repo (`backend-ci.yml`) and called from
+`.github/workflows/ci.yml`. A push to `develop` or `main` auto-deploys to the matching
+environment (see the infra README for the VPS setup and required secrets).
 
 ## Related repositories
 
-frontend, infra (Docker and shared CI/CD), documents (SRS, SDS, ADRs).
+[stackstorm-frontend-customer](https://github.com/stackstormproject/stackstorm-frontend-customer),
+[stackstorm-frontend-admin](https://github.com/stackstormproject/stackstorm-frontend-admin),
+[infra](https://github.com/stackstormproject/infra) (Docker and shared CI/CD),
+[documents](https://github.com/stackstormproject/documents) (SRS, SDS, ADRs).
