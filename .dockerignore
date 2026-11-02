@@ -1,0 +1,13 @@
+node_modules
+npm-debug.log
+.env
+.env.*
+!.env.example
+coverage
+.git
+.github
+tests
+*.md
+.eslintrc.js
+.prettierrc
+uploads
