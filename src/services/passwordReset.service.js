@@ -15,26 +15,99 @@ const invalidLink = () =>
     'This reset link is not valid or has expired. Ask for a new one.'
   );
 
-const resetEmail = (name, link) => ({
-  subject: 'Reset your Dickwella Fashion Corner password',
-  text: [
-    `Hello ${name},`,
-    '',
-    'We received a request to reset your password. Open this link to choose a new one:',
-    link,
-    '',
-    `The link works for ${AUTH.RESET_TOKEN_MINUTES} minutes and only once.`,
-    'If you did not ask for this, ignore this email; your password stays the same.',
-    '',
-    'Dickwella Fashion Corner',
-  ].join('\n'),
-  html: `<p>Hello ${name.replace(/[<>&"]/g, '')},</p>
-<p>We received a request to reset your password.</p>
-<p><a href="${link}">Choose a new password</a></p>
-<p>The link works for ${AUTH.RESET_TOKEN_MINUTES} minutes and only once. If you did not ask
-for this, ignore this email; your password stays the same.</p>
-<p>Dickwella Fashion Corner</p>`,
-});
+const resetEmail = (name, link) => {
+  const safeName = name.replace(/[<>&"]/g, '');
+
+  return {
+    subject: 'Reset your Dickwella Fashion Corner password',
+    text: [
+      `Hello ${name},`,
+      '',
+      'We received a request to reset your password. Open this link to choose a new one:',
+      link,
+      '',
+      `The link works for ${AUTH.RESET_TOKEN_MINUTES} minutes and only once.`,
+      'If you did not ask for this, ignore this email; your password stays the same.',
+      '',
+      'Dickwella Fashion Corner',
+    ].join('\n'),
+    // Table layout with inlined styles throughout: the only way an email renders
+    // consistently across Gmail, Outlook and mobile mail apps, none of which can be
+    // trusted to apply an external or even a <head> stylesheet the same way twice.
+    html: `<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="light" />
+    <title>Reset your Dickwella Fashion Corner password</title>
+  </head>
+  <body style="margin:0; padding:0; background-color:#f1f5f9; font-family:'Segoe UI', Roboto, Helvetica, Arial, sans-serif;">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f1f5f9; padding:32px 16px;">
+      <tr>
+        <td align="center">
+          <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px; background-color:#ffffff; border-radius:12px; overflow:hidden; box-shadow:0 1px 3px rgba(10,25,47,0.08);">
+            <tr>
+              <td align="center" style="background-color:#0a192f; padding:28px 24px;">
+                <span style="display:inline-block; font-size:12px; letter-spacing:2.5px; text-transform:uppercase; color:#d4af37; font-weight:600;">
+                  Dickwella Fashion Corner
+                </span>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:36px 32px 8px;">
+                <p style="margin:0 0 20px; font-size:22px; line-height:1.3; font-weight:700; color:#0a192f;">
+                  Reset your password
+                </p>
+                <p style="margin:0 0 16px; font-size:15px; line-height:1.6; color:#334155;">
+                  Hello ${safeName},
+                </p>
+                <p style="margin:0 0 28px; font-size:15px; line-height:1.6; color:#334155;">
+                  We received a request to reset your password. Click the button below to
+                  choose a new one.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td align="center" style="padding:0 32px 32px;">
+                <table role="presentation" cellpadding="0" cellspacing="0">
+                  <tr>
+                    <td align="center" style="border-radius:8px; background-color:#d4af37;">
+                      <a href="${link}" style="display:inline-block; padding:14px 36px; font-size:15px; font-weight:700; color:#0a192f; text-decoration:none; border-radius:8px;">
+                        Choose a new password
+                      </a>
+                    </td>
+                  </tr>
+                </table>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:0 32px 32px;">
+                <p style="margin:0 0 16px; font-size:13px; line-height:1.6; color:#64748b;">
+                  Button not working? Paste this link into your browser instead:<br />
+                  <a href="${link}" style="color:#0a192f; word-break:break-all;">${link}</a>
+                </p>
+                <p style="margin:0; font-size:13px; line-height:1.6; color:#64748b;">
+                  This link works for ${AUTH.RESET_TOKEN_MINUTES} minutes and only once. If
+                  you did not ask for this, ignore this email - your password stays the same.
+                </p>
+              </td>
+            </tr>
+            <tr>
+              <td style="padding:20px 32px; background-color:#f8fafc; border-top:1px solid #e2e8f0;">
+                <p style="margin:0; font-size:12px; line-height:1.6; color:#94a3b8; text-align:center;">
+                  Dickwella Fashion Corner &middot; Main Street, Dickwella, Sri Lanka
+                </p>
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </body>
+</html>`,
+  };
+};
 
 /**
  * Starts a password reset (#185). Always answers the same way, whether or not the email has
