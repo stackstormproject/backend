@@ -251,6 +251,16 @@ function initSocketServer(httpServer, options = {}) {
 
         if (sessionId) {
           session = await ChatSession.findByPk(sessionId);
+
+          // The shopper's browser can still remember a session that's since been marked
+          // resolved (closed). Don't silently reattach them to a dead conversation - the
+          // virtual assistant never replies there once an agent has claimed it, and the
+          // customer's message would land in the "Resolved" queue instead of "Waiting".
+          // Start a fresh session instead, same as if none was remembered at all.
+          if (session && !isAgent && session.status === 'closed') {
+            session = null;
+          }
+
           if (!session && isAgent) {
             const error = { message: 'Chat session not found' };
             socket.emit('chat:error', error);
@@ -381,6 +391,20 @@ function initSocketServer(httpServer, options = {}) {
           if (typeof callback === 'function') callback({ success: false, error });
           return;
         }
+
+        // A customer can still have this room joined from before a resolve went through
+        // (e.g. a message sent in the same instant the agent resolved it). Don't accept it
+        // into a closed conversation - the client is expected to start a new session.
+        if (!isAgent) {
+          const liveSession = await ChatSession.findByPk(sessionId);
+          if (liveSession && liveSession.status === 'closed') {
+            const error = { message: 'This conversation has ended. Please start a new chat.' };
+            socket.emit('chat:error', error);
+            if (typeof callback === 'function') callback({ success: false, error });
+            return;
+          }
+        }
+
         const isMessageFromAgent = isAgent;
         const senderRole = isMessageFromAgent ? 'support_agent' : 'customer';
         const senderType = isMessageFromAgent ? 'agent' : 'customer';

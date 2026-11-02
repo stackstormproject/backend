@@ -307,5 +307,38 @@ describe('STORM-BE-CHAT: Socket.IO Real-Time Chat Gateway', () => {
       expect(ChatSession.create).not.toHaveBeenCalled();
       agent.disconnect();
     });
+
+    // Refs: "no reply, and doesn't show as waiting" after a resolved chat - the customer's
+    // browser still remembered the old, now-closed session id and kept posting into it.
+    it('should start a fresh session for a customer instead of reattaching to a resolved one', async () => {
+      const customer = await connect(generateAccessToken(42, 'customer'));
+      ChatSession.findByPk.mockResolvedValue({ id: 301, customerId: 42, status: 'closed' });
+      ChatSession.create.mockResolvedValue({ id: 777, customerId: 42, status: 'open' });
+
+      const res = await emit(customer, 'chat:join', { sessionId: 301 });
+
+      expect(res.success).toBe(true);
+      expect(res.sessionId).toBe(777);
+      expect(ChatSession.create).toHaveBeenCalledWith({ customerId: 42, status: 'open' });
+      customer.disconnect();
+    });
+
+    it('should refuse a customer message sent into an already-resolved session', async () => {
+      const customer = await connect(generateAccessToken(42, 'customer'));
+      ChatSession.findByPk.mockResolvedValue({
+        id: 301,
+        customerId: 42,
+        status: 'open',
+        save: jest.fn(),
+      });
+      await emit(customer, 'chat:join', { sessionId: 301 });
+
+      ChatSession.findByPk.mockResolvedValue({ id: 301, customerId: 42, status: 'closed' });
+      const res = await emit(customer, 'chat:message', { sessionId: 301, message: 'still there?' });
+
+      expect(res.success).toBe(false);
+      expect(ChatMessage.create).not.toHaveBeenCalled();
+      customer.disconnect();
+    });
   });
 });
