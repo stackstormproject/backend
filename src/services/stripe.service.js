@@ -1,0 +1,428 @@
+// ==============================================================================
+// Payment Service - Stripe PaymentIntents, server-side verification and webhooks
+// Why this file matters: an order only becomes "paid" after the server itself has
+// confirmed the PaymentIntent with Stripe. The browser is never trusted to say so.
+// ==============================================================================
+
+const Stripe = require('stripe');
+const { QueryTypes } = require('sequelize');
+const { Customer, Order, sequelize } = require('../models');
+const reservationService = require('./reservation.service');
+const paymentMethodService = require('./paymentMethod.service');
+const loyaltyService = require('./loyalty.service');
+const promoCodeService = require('./promoCode.service');
+const { canReadOrder } = require('./order.service');
+const { storefrontUrl } = require('../utils/storefrontUrl');
+const logger = require('../config/logger');
+const ApiError = require('../utils/ApiError');
+
+const CURRENCY = 'lkr';
+const PAYABLE_STATUS = 'payment_pending';
+const PAID_STATUS = 'processing';
+const MOCK_PROVIDER = 'mock';
+const STRIPE_PROVIDER = 'stripe';
+const PLACEHOLDER_KEY = /^sk_(test|live)_(x+|mock.*)$/i;
+
+/**
+ * Stripe when a real secret key is configured. Outside production a missing or placeholder key
+ * selects the mock provider so local development and CI work without a Stripe account.
+ * Production without a key is a configuration error, never a silent mock.
+ */
+const getProvider = () => {
+  const key = process.env.STRIPE_SECRET_KEY || '';
+  if (key && !PLACEHOLDER_KEY.test(key)) return STRIPE_PROVIDER;
+  if (process.env.NODE_ENV === 'production') {
+    throw new ApiError(503, 'Payments are not configured', undefined, 'PAYMENTS_UNAVAILABLE');
+  }
+  return MOCK_PROVIDER;
+};
+
+let stripeClient;
+const getStripe = () => {
+  if (!stripeClient) {
+    stripeClient = new Stripe(process.env.STRIPE_SECRET_KEY, { apiVersion: '2023-10-16' });
+  }
+  return stripeClient;
+};
+
+/** Integer minor units, avoiding floating-point drift (LKR 8,850.00 -> 885000). */
+const toMinorUnits = (amount) => Math.round(Number(amount) * 100);
+
+/** Loads an order the caller may act on; anything else is "not found" (no id probing). */
+const loadOwnedOrder = async (orderId, { customerId = null, guestToken = null } = {}) => {
+  if (!orderId) throw ApiError.badRequest('order_id is required');
+  const order = await Order.findByPk(orderId);
+  if (!order || !canReadOrder(order, customerId, guestToken)) {
+    throw ApiError.notFound(`Order with ID '${orderId}' not found`);
+  }
+  return order;
+};
+
+/**
+ * Creates (or reuses) the PaymentIntent for a payment_pending order.
+ * The amount always comes from the stored order total, never from the client.
+ */
+const createPaymentIntent = async (orderId, caller = {}) => {
+  const order = await loadOwnedOrder(orderId, caller);
+  if (order.status !== PAYABLE_STATUS) {
+    throw ApiError.conflict(`Order ${order.id} is not awaiting payment (status: ${order.status})`);
+  }
+
+  const amount = Number(order.totalAmount);
+  const provider = getProvider();
+
+  if (provider === MOCK_PROVIDER) {
+    const paymentIntentId = order.paymentIntentId || `mock_pi_${order.id}_${Date.now()}`;
+    if (!order.paymentIntentId) await order.update({ paymentIntentId });
+    return {
+      provider,
+      clientSecret: `${paymentIntentId}_secret_mock`,
+      paymentIntentId,
+      orderId: order.id,
+      amount,
+      currency: 'LKR',
+    };
+  }
+
+  const stripe = getStripe();
+  let intent = order.paymentIntentId
+    ? await stripe.paymentIntents.retrieve(order.paymentIntentId)
+    : null;
+  if (!intent || intent.status === 'canceled') {
+    intent = await stripe.paymentIntents.create(
+      {
+        amount: toMinorUnits(amount),
+        currency: CURRENCY,
+        metadata: { order_id: String(order.id) },
+        payment_method_types: ['card'],
+      },
+      { idempotencyKey: `order-${order.id}-${toMinorUnits(amount)}` }
+    );
+    await order.update({ paymentIntentId: intent.id });
+  }
+
+  return {
+    provider,
+    clientSecret: intent.client_secret,
+    paymentIntentId: intent.id,
+    orderId: order.id,
+    amount,
+    currency: 'LKR',
+  };
+};
+
+/** Finds the stock hold that checkout linked to this order (see checkout.service). */
+const findOrderReservationId = async (orderId) => {
+  const [row] = await sequelize.query(
+    `SELECT id FROM stock_reservations WHERE order_id = :orderId
+      ORDER BY created_at DESC LIMIT 1`,
+    { replacements: { orderId }, type: QueryTypes.SELECT }
+  );
+  return row ? row.id : null;
+};
+
+/**
+ * Marks a verified order as paid and turns its 15-minute hold into a permanent deduction.
+ * Idempotent: a webhook and the browser may both report the same success.
+ */
+const markOrderPaid = async (order, paymentIntentId) => {
+  if (order.status === PAID_STATUS) return { orderId: order.id, status: order.status };
+  if (order.status !== PAYABLE_STATUS) {
+    throw ApiError.conflict(`Order ${order.id} cannot be paid (status: ${order.status})`);
+  }
+
+  const reservationId = await findOrderReservationId(order.id);
+  if (reservationId) {
+    // false means the hold already expired or was settled; the order still records payment
+    const confirmed = await reservationService.confirmReservation(reservationId);
+    if (!confirmed) {
+      logger.warn(`[PAYMENT] Reservation ${reservationId} for order ${order.id} was not active`);
+    }
+  }
+
+  await order.update({ status: PAID_STATUS, paymentIntentId });
+  logger.info(`[PAYMENT] Order ${order.id} paid (${paymentIntentId})`);
+
+  // Sprint 13: spend any redeemed points, award points earned, and count the promo
+  // redemption, now that the order is actually paid rather than merely initiated.
+  const goodsSubtotal =
+    Number(order.totalAmount) - Number(order.shippingCost) + Number(order.discountAmount);
+  await Promise.all([
+    loyaltyService.settleOrderLoyalty(order, goodsSubtotal).catch((err) => {
+      logger.error(`[PAYMENT] Loyalty settlement failed for order ${order.id}: ${err.message}`);
+    }),
+    promoCodeService.recordUsage(order.promoCodeId).catch((err) => {
+      logger.error(`[PAYMENT] Promo usage recording failed for order ${order.id}: ${err.message}`);
+    }),
+  ]);
+
+  return { orderId: order.id, status: PAID_STATUS };
+};
+
+/**
+ * Called by the storefront after Stripe.js reports success. The server re-checks the intent
+ * with Stripe (status, amount, order metadata) before trusting it.
+ */
+const confirmOrderPayment = async (orderId, caller = {}, paymentIntentId = null) => {
+  const order = await loadOwnedOrder(orderId, caller);
+  if (order.status === PAID_STATUS) return { orderId: order.id, status: order.status };
+
+  const intentId = paymentIntentId || order.paymentIntentId;
+  if (!intentId || intentId !== order.paymentIntentId) {
+    throw ApiError.badRequest('Payment intent does not belong to this order');
+  }
+
+  if (getProvider() === STRIPE_PROVIDER) {
+    const intent = await getStripe().paymentIntents.retrieve(intentId);
+    const amountMatches = intent.amount === toMinorUnits(order.totalAmount);
+    const orderMatches = String(intent.metadata?.order_id) === String(order.id);
+    if (intent.status !== 'succeeded' || !amountMatches || !orderMatches) {
+      throw new ApiError(
+        402,
+        `Payment not completed (status: ${intent.status})`,
+        undefined,
+        'PAYMENT_NOT_COMPLETED'
+      );
+    }
+  }
+
+  return markOrderPaid(order, intentId);
+};
+
+// ---------------------------------------------------------------------------------------------
+// Hosted payment page (#180): checkout redirects the shopper to Stripe Checkout and Stripe
+// sends them back to the storefront, which asks the server to verify the session. Without a
+// Stripe key the storefront's own clearly labelled test gateway stands in for Stripe.
+// ---------------------------------------------------------------------------------------------
+const SESSION_TTL_SECONDS = 30 * 60; // Stripe's minimum
+const MOCK_SESSION_PREFIX = 'mock_cs_';
+
+/**
+ * The Stripe customer for a signed-in shopper, created on first use (#190). Payments made with
+ * it let Stripe Checkout offer "save this card" and show cards saved earlier.
+ */
+const stripeCustomerFor = async (customerId) => {
+  if (!customerId) return null;
+  const customer = await Customer.findByPk(customerId);
+  if (!customer) return null;
+  if (customer.stripeCustomerId) return customer.stripeCustomerId;
+  const created = await getStripe().customers.create({
+    email: customer.email,
+    name: customer.name,
+    metadata: { customer_id: String(customer.id) },
+  });
+  await customer.update({ stripeCustomerId: created.id });
+  return created.id;
+};
+
+/** Saving a card must never undo a payment that went through. */
+const saveCardQuietly = async (work) => {
+  try {
+    await work();
+  } catch (error) {
+    logger.error('Could not save the card after payment', { error: error.message });
+  }
+};
+
+/**
+ * Starts payment on the hosted page for a payment_pending order.
+ * @returns {{ provider, sessionId, url, amount }} url is where the browser goes next
+ */
+const createCheckoutSession = async (orderId, caller = {}) => {
+  const order = await loadOwnedOrder(orderId, caller);
+  if (order.status !== PAYABLE_STATUS) {
+    throw ApiError.conflict(`Order ${order.id} is not awaiting payment (status: ${order.status})`);
+  }
+  const amount = Number(order.totalAmount);
+  const back = `${storefrontUrl()}/checkout/complete?order=${order.id}`;
+
+  if (getProvider() === MOCK_PROVIDER) {
+    const sessionId = `${MOCK_SESSION_PREFIX}${order.id}_${Date.now()}`;
+    await order.update({ paymentIntentId: sessionId });
+    return {
+      provider: MOCK_PROVIDER,
+      sessionId,
+      url: `${storefrontUrl()}/checkout/test-gateway?order=${order.id}&session_id=${sessionId}`,
+      amount,
+    };
+  }
+
+  const stripeCustomer = await stripeCustomerFor(order.customerId);
+  const session = await getStripe().checkout.sessions.create({
+    mode: 'payment',
+    payment_method_types: ['card'],
+    client_reference_id: String(order.id),
+    ...(stripeCustomer
+      ? {
+          customer: stripeCustomer,
+          saved_payment_method_options: { payment_method_save: 'enabled' },
+        }
+      : { customer_email: order.guestEmail || undefined }),
+    line_items: [
+      {
+        quantity: 1,
+        price_data: {
+          currency: CURRENCY,
+          unit_amount: toMinorUnits(amount),
+          product_data: { name: `Dickwella Fashion Corner order #${order.id}` },
+        },
+      },
+    ],
+    metadata: { order_id: String(order.id) },
+    payment_intent_data: { metadata: { order_id: String(order.id) } },
+    success_url: `${back}&session_id={CHECKOUT_SESSION_ID}`,
+    cancel_url: `${back}&cancelled=1`,
+    expires_at: Math.floor(Date.now() / 1000) + SESSION_TTL_SECONDS,
+  });
+  await order.update({ paymentIntentId: session.id });
+  return { provider: STRIPE_PROVIDER, sessionId: session.id, url: session.url, amount };
+};
+
+/**
+ * The shopper is back from the payment page. The server checks the session with Stripe
+ * (paid, amount, order) before marking the order paid; repeating the call is harmless.
+ */
+const confirmCheckoutSession = async (
+  orderId,
+  caller = {},
+  sessionId = null,
+  { saveCard = false } = {}
+) => {
+  const order = await loadOwnedOrder(orderId, caller);
+  if (order.status === PAID_STATUS) return { orderId: order.id, status: order.status };
+  if (!sessionId || sessionId !== order.paymentIntentId) {
+    throw ApiError.badRequest('Payment session does not belong to this order');
+  }
+
+  if (sessionId.startsWith(MOCK_SESSION_PREFIX)) {
+    if (getProvider() !== MOCK_PROVIDER) {
+      throw ApiError.badRequest('Payment session does not belong to this order');
+    }
+    const result = await markOrderPaid(order, `mock_pi_${order.id}_${Date.now()}`);
+    if (saveCard && order.customerId) {
+      await saveCardQuietly(() => paymentMethodService.saveTestCard(order.customerId));
+    }
+    return result;
+  }
+
+  const session = await getStripe().checkout.sessions.retrieve(sessionId, {
+    expand: ['payment_intent.payment_method'],
+  });
+  const paid = session.payment_status === 'paid';
+  const amountMatches = session.amount_total === toMinorUnits(order.totalAmount);
+  const orderMatches = String(session.metadata?.order_id) === String(order.id);
+  if (!paid || !amountMatches || !orderMatches) {
+    throw new ApiError(
+      402,
+      `Payment not completed (status: ${session.payment_status})`,
+      undefined,
+      'PAYMENT_NOT_COMPLETED'
+    );
+  }
+  const intentId =
+    typeof session.payment_intent === 'string'
+      ? session.payment_intent
+      : session.payment_intent?.id;
+  const result = await markOrderPaid(order, intentId || sessionId);
+  // The shopper ticked "save" on Stripe's page: the card is attached to their Stripe customer.
+  const method = session.payment_intent?.payment_method;
+  if (order.customerId && method?.customer && method.allow_redisplay === 'always') {
+    await saveCardQuietly(() => paymentMethodService.saveFromStripe(order.customerId, method));
+  }
+  return result;
+};
+
+/** Removes a saved card at Stripe (#190). */
+const detachPaymentMethod = async (paymentMethodId) => {
+  if (getProvider() !== STRIPE_PROVIDER) return;
+  await getStripe().paymentMethods.detach(paymentMethodId);
+};
+
+/**
+ * Refunds all or part of an order's payment. Mock payments (development/CI) are recorded as
+ * refunded without calling Stripe. `amount` is in rupees; omit it for a full refund.
+ * @returns {Promise<{ refunded: boolean, provider?: string, refundId?: string }>}
+ */
+const refundOrderPayment = async (order, amount = null, idempotencyKey = null) => {
+  if (!order.paymentIntentId) return { refunded: false };
+  const value = amount === null ? Number(order.totalAmount) : Number(amount);
+  if (!(value > 0)) return { refunded: false };
+  if (String(order.paymentIntentId).startsWith('mock_pi_')) {
+    logger.info(`[PAYMENT] Mock refund of LKR ${value} for order ${order.id}`);
+    return { refunded: true, provider: MOCK_PROVIDER, amount: value };
+  }
+  const refund = await getStripe().refunds.create(
+    { payment_intent: order.paymentIntentId, amount: toMinorUnits(value) },
+    // Callers refunding one returned item pass their own key, so two refunds of the same
+    // amount on one order are not collapsed into a single refund by Stripe.
+    { idempotencyKey: idempotencyKey || `refund-${order.id}-${toMinorUnits(value)}` }
+  );
+  logger.info(`[PAYMENT] Refund ${refund.id} of LKR ${value} for order ${order.id}`);
+  return { refunded: true, provider: STRIPE_PROVIDER, refundId: refund.id, amount: value };
+};
+
+/** Verifies a Stripe webhook signature against the raw request bytes. */
+const constructWebhookEvent = (rawPayload, signature) => {
+  if (!signature) throw ApiError.badRequest('Missing Stripe-Signature header');
+  if (!rawPayload) throw ApiError.badRequest('Missing raw webhook payload body');
+  try {
+    return getStripe().webhooks.constructEvent(
+      rawPayload,
+      signature,
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (err) {
+    logger.error(`[STRIPE] Signature verification failed: ${err.message}`);
+    throw ApiError.badRequest(`Webhook signature verification failed: ${err.message}`);
+  }
+};
+
+/** Handles verified Stripe events; payment_intent.succeeded and checkout.session.completed pay. */
+const handleWebhookEvent = async (event) => {
+  const intent = event?.data?.object;
+  const orderId = intent?.metadata?.order_id;
+  // #180: a paid hosted checkout also arrives as checkout.session.completed, in case the
+  // shopper closes the tab before coming back to the shop.
+  if (event?.type === 'checkout.session.completed') {
+    const order = orderId ? await Order.findByPk(orderId) : null;
+    if (!order || intent.payment_status !== 'paid') return { success: true, processed: false };
+    if (intent.amount_total !== toMinorUnits(order.totalAmount)) {
+      logger.error(`[STRIPE WEBHOOK] Amount mismatch for order ${orderId}`);
+      return { success: true, processed: false };
+    }
+    const result = await markOrderPaid(order, intent.payment_intent || intent.id);
+    return { success: true, processed: true, ...result };
+  }
+  if (event?.type !== 'payment_intent.succeeded') {
+    return { success: true, processed: false, ignoredEvent: event?.type };
+  }
+  if (!orderId) {
+    logger.warn('[STRIPE WEBHOOK] payment_intent.succeeded without metadata.order_id');
+    return { success: true, processed: false };
+  }
+
+  const order = await Order.findByPk(orderId);
+  if (!order) return { success: true, processed: false };
+  if (intent.amount !== toMinorUnits(order.totalAmount)) {
+    logger.error(`[STRIPE WEBHOOK] Amount mismatch for order ${orderId}`);
+    return { success: true, processed: false };
+  }
+  const result = await markOrderPaid(order, intent.id);
+  return { success: true, processed: true, ...result };
+};
+
+module.exports = {
+  getProvider,
+  toMinorUnits,
+  createPaymentIntent,
+  confirmOrderPayment,
+  createCheckoutSession,
+  confirmCheckoutSession,
+  detachPaymentMethod,
+  markOrderPaid,
+  refundOrderPayment,
+  constructWebhookEvent,
+  handleWebhookEvent,
+  MOCK_PROVIDER,
+  STRIPE_PROVIDER,
+};
