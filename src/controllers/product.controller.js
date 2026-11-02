@@ -1,0 +1,91 @@
+// ==============================================================================
+// Product Catalog Controller - Faceted Filtering & PDP Resolution
+// Why this file matters: Validates inbound query parameters, routes requests to
+// the high-performance product query service, and returns structured PDP data.
+// ==============================================================================
+
+const productService = require('../services/product.service');
+const brandService = require('../services/brand.service');
+const productSearch = require('../services/productSearch.service');
+const { successResponse, errorResponse } = require('../utils/responseFormatter');
+
+/**
+ * Controller for retrieving complete product details by SEO-friendly URL slug.
+ * E.g., GET /api/v1/products/handloom-linen-batik-shirt
+ */
+const getProductBySlug = async (req, res, next) => {
+  try {
+    const { slug } = req.params;
+    const product = await productService.getProductBySlug(slug);
+
+    if (!product) {
+      return errorResponse(res, `Product not found: ${slug}`, [], 404);
+    }
+
+    return successResponse(res, product, 'Product details retrieved successfully', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/**
+ * Controller for retrieving paginated product catalog with multi-faceted filtering.
+ * E.g., GET /api/v1/products?category_id=1&size=L&min_price=2000
+ */
+const getProducts = async (req, res, next) => {
+  try {
+    const categoryId = req.query.category_id || req.query.categoryId || req.query.category;
+    const minPrice = req.query.min_price !== undefined ? req.query.min_price : req.query.minPrice;
+    const maxPrice = req.query.max_price !== undefined ? req.query.max_price : req.query.maxPrice;
+    const search = req.query.search || req.query.q || req.query.keyword;
+    const { size, color, sort, section, page = 1, limit = 12 } = req.query;
+    const brand = req.query.brand ? await brandService.brandNameFor(req.query.brand) : undefined;
+
+    const result = await productService.listProducts({
+      categoryId,
+      minPrice,
+      maxPrice,
+      size,
+      color,
+      sort,
+      search,
+      section,
+      brand,
+      page,
+      limit,
+    });
+
+    return successResponse(res, result, 'Products retrieved successfully', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** GET /products/suggest?q=bat -> matching products, categories and brands (#188). */
+const getSuggestions = async (req, res, next) => {
+  try {
+    const result = await productSearch.suggest(req.query.q ?? req.query.search);
+    res.set('Cache-Control', 'public, max-age=30');
+    return successResponse(res, result, 'Suggestions retrieved', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+/** GET /products/facets -> in-stock colours and sizes for the filters (#188). */
+const getFacets = async (req, res, next) => {
+  try {
+    const result = await productSearch.facets();
+    res.set('Cache-Control', 'public, max-age=60');
+    return successResponse(res, result, 'Filter options retrieved', 200);
+  } catch (error) {
+    return next(error);
+  }
+};
+
+module.exports = {
+  getProductBySlug,
+  getProducts,
+  getSuggestions,
+  getFacets,
+};
