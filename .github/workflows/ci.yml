@@ -9,6 +9,8 @@ on:
       - 'fix/**'
       - 'hotfix/**'
       - 'release/**'
+      - 'chore/**'
+      - 'test/**'
   pull_request:
     branches:
       - develop
